@@ -79,7 +79,7 @@ This work is co-funded by:
 
 ## 👥 Authors
 
-- **Daniele Falcetta** - Data Science Department, EURECOM & School of Biomedical Engineering, King's College London
+- **Daniele Falcetta** - Data Science Department, EURECOM
 - **Liane S. Canas** - School of Biomedical Engineering & Imaging Sciences, King's College London
 - **Lorenzo Suppa** - Data Science Department, EURECOM & Politecnico di Torino
 - **Matteo Pentassuglia** - Data Science Department, EURECOM
