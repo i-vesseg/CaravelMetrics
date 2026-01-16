@@ -7,11 +7,11 @@
 
 **An Automated Framework for Large-Scale Graph-Based Cerebrovascular Analysis**
 
-**(Submitted at ISBI2026)**
+**Accepted at ISBI2026!**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Paper](https://img.shields.io/badge/Paper-Submitted@ISBI%202026-green.svg)](link-to-paper)
+[![Paper](https://img.shields.io/badge/Paper-Accepted@ISBI%202026-green.svg)](link-to-paper)
 
 CaravelMetrics is an open-source Python framework for comprehensive, automated analysis of cerebrovascular networks from medical imaging data. It transforms binary vessel segmentation masks into quantitative morphometric, topological, and geometric features across anatomically defined brain territories.
 
