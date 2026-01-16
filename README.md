@@ -5,7 +5,7 @@
   <img src="logos/CaravelMetrics_LOGO.png" alt="CaravelMetrics Logo" width="300"/>
 </p>
 
-**An Automated Framework for Large-Scale Graph-Based Cerebrovascular Analysis**
+**[An Automated Framework for Large-Scale Graph-Based Cerebrovascular Analysis](https://arxiv.org/abs/2512.03869)** (Arxiv)
 
 **Accepted at ISBI2026!**
 
