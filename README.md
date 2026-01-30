@@ -29,12 +29,36 @@ Understanding cerebrovascular morphology is critical for detecting disease and d
 
 ### Key Capabilities
 
+- **Modular Architecture**: Three independent processing modules (Atlas Registration, Graph Extraction, Metric Computation)
+- **Batch Processing**: Automated multi-subject pipeline with parallel execution
 - **Automated Graph Construction**: Converts vessel segmentation masks to mathematical graph representations via skeletonization
 - **Multi-Scale Feature Extraction**: Computes 15 complementary features across four categories
 - **Dual Analysis Modes**: Supports both whole-brain and atlas-based regional analysis
 - **Regional Analysis**: Integrates arterial atlas for territory-specific measurements across 30 brain regions
 - **Population-Level Studies**: Validated on 570 subjects (ages 20-86) from the IXI dataset
 - **Reproducible Pipeline**: End-to-end automation from segmentation masks to statistical analysis
+- **Advanced Graph Processing**: Geodesic distance computation, orphan node handling, artifact removal
+
+---
+
+## � Quick Start
+
+```bash
+# 1. Clone and install
+git clone https://github.com/i-vesseg/CaravelMetrics.git
+cd CaravelMetrics
+pip install -r requirements.txt
+
+# 2. Configure your data paths in CaravelMetrics.py
+# Edit: segmentation_folder, image_folder, output_base_folder, use_atlas
+
+# 3. Run the pipeline
+python CaravelMetrics.py
+
+# The pipeline will automatically process all subjects in your data folders
+```
+
+For detailed configuration options and advanced usage, see the [Usage Guide](docs/USAGE.md).
 
 ---
 
@@ -42,9 +66,9 @@ Understanding cerebrovascular morphology is critical for detecting disease and d
 
 **Full documentation and usage examples are available in [`docs/`](docs/)**
 
-- **[Pipeline Overview](docs/PIPELINE.md)** - Processing Steps and Modalities 
+- **[Pipeline Overview](docs/PIPELINE.md)** - Processing steps and modular architecture
 - **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions
-- **[Usage Guide](docs/USAGE.md)** - Complete command reference and examples
+- **[Usage Guide](docs/USAGE.md)** - Configuration and batch processing examples
 - **[Features Documentation](docs/FEATURES.md)** - Detailed feature definitions
 - **[Analysis Guide](docs/ANALYSIS.md)** - Statistical analysis and visualization
 
@@ -87,6 +111,13 @@ This work is co-funded by:
 - **Marc Modat** - School of Biomedical Engineering & Imaging Sciences, King's College London
 - **Sébastien Ourselin** - School of Biomedical Engineering & Imaging Sciences, King's College London
 - **Maria A. Zuluaga** - Data Science Department, EURECOM & School of Biomedical Engineering, King's College London
+
+## 🤝 Contributors
+
+- **Bogdan Ion** - Data Science Department, EURECOM
+- **Duccio Lalli** - Double Degree MSc Student in Data Science and Engineering at Politecnico di Torino & EURECOM
+
+---
 
 ### Contact
 

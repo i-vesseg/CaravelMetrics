@@ -90,13 +90,17 @@ All tortuosity metrics are computed using arc-length parameterized cubic B-splin
 
 ### Graph Construction Algorithm
 
-1. **Skeletonization**: Uses scikit-image `skeletonize` function with 3D morphological thinning
-2. **Node Detection**: 26-connectivity neighborhood analysis to identify:
+1. **Mesh Generation**: Create surface mesh using vedo for geodesic distance computation
+2. **Skeletonization**: Uses scikit-image `skeletonize` function with 3D morphological thinning
+3. **Node Detection**: 26-connectivity neighborhood analysis to identify:
    - Endpoints (degree = 1)
    - Bifurcations (degree = 3)
    - Abnormal nodes (degree > 3)
-3. **Edge Weighting**: Euclidean distance between adjacent nodes
-4. **Artifact Removal**: Selective pruning of triangular loops (3-node cycles) by removing the longest edge
+4. **Edge Weighting**: Euclidean distance between adjacent nodes
+5. **Orphan Handling**: Connect isolated branches within distance threshold using angle validation
+6. **Laplacian Smoothing**: Iterative smoothing of node positions (alpha=0.8, iterations=2)
+7. **Geodesic Distance**: Mesh-based geodesic path lengths for accurate tortuosity measurement
+8. **Artifact Removal**: Selective pruning of triangular loops (3-node cycles) by removing the longest edge
 
 ### Tortuosity Computation
 
