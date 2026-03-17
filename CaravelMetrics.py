@@ -91,25 +91,26 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
         logger.info(f"Processing file: {fname} (OUTPUT: {output_folder})")
         logger.info("="*60)
         
-        # Determine T1 image path
-        t1_fname = fname.replace('MRA', 'T1') # File name of the corresponding T1 image (with extension)
-        t1_patient_name = patient_name.replace('MRA', 'T1') # Patient name for T1 image (without extension)    
-        t1_image_path = os.path.join(t1_image_folder, t1_fname)
         
         # Validate input files exist
         if not os.path.exists(mask_path):
             raise FileNotFoundError(f"Mask file not found: {mask_path}")
         if not os.path.exists(image_path):
             logger.warning(f"Image file not found: {image_path}")
-        if not os.path.exists(t1_image_path):
-            logger.warning(f"T1 image file not found: {t1_image_path}")
-    
     
         #=====================================================================================================#
         #                                      1 - Atlas registration
         #=====================================================================================================#
         
         if use_atlas:
+            # Determine T1 image path
+            t1_fname = fname.replace('MRA', 'T1') # File name of the corresponding T1 image (with extension)
+            t1_patient_name = patient_name.replace('MRA', 'T1') # Patient name for T1 image (without extension)    
+            t1_image_path = os.path.join(t1_image_folder, t1_fname)
+            
+            if not os.path.exists(t1_image_path):
+                logger.warning(f"T1 image file not found: {t1_image_path}")
+        
             registered_atlas_path = os.path.join(output_folder, f"{t1_patient_name}_registered_atlas.nii.gz")
             if skip_existing and os.path.exists(registered_atlas_path):
                 logger.info(f"  Skipped ATLAS REGISTRATION: {fname} (output already exists)")
