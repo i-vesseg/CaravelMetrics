@@ -22,9 +22,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Set paths
-segmentation_folder = os.path.join('path/to/nnUNet')
-image_folder = os.path.join('path/to/00_ORIGINAL_Dataset')
-t1_image_folder = os.path.join('path/to/IXI_T1/sources')
+segmentation_folder = os.path.join('/home/pentassu/data/Eva_coronaries_05_2026')
+# segmentation_folder = os.path.join('/home/pentassu/data/SMILE_UHURA_Challenge/full_GT')
+image_folder = os.path.join('')
+t1_image_folder = os.path.join('')
 
 atlas_path = 'ArterialAtlas.nii.gz'
 label_map_path = 'ArterialAtlas_labels.txt'
@@ -52,6 +53,9 @@ chunk_size = 1  # Process files one at a time for better error isolation
 # Control whether to use atlas registration step or treat segmentation as is (1 single region)
 use_atlas = False  # Whether to use atlas registration step
 
+# Control whether to save the raw voxel skeleton produced during graph extraction
+save_skeleton_mask = True  # Set to True to save vessel_skeleton_raw.nii.gz
+
 ###################################################################
 #                   DO NOT EDIT BELOW THIS LINE       
 ###################################################################
@@ -68,7 +72,7 @@ if invalid:
     raise ValueError(f"Invalid metrics requested: {invalid}")
 
 
-def process_single_file(fname, image_folder, t1_image_folder, segmentation_folder, atlas_path, output_base_folder, skip_existing):
+def process_single_file(fname, image_folder, t1_image_folder, segmentation_folder, atlas_path, output_base_folder, skip_existing, save_skeleton_mask):
     """Process a single segmentation file with comprehensive error handling"""
     
     try:
@@ -129,7 +133,7 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
             logger.info(f"  Skipped VESSEL GRAPH EXTRACTION: {fname} (output already exists)")
         else:
             logger.info(f"  Starting VESSEL GRAPH EXTRACTION for: {fname}")
-            extract_graph(mask_path, output_folder)
+            extract_graph(mask_path, output_folder, save_skeleton_mask=save_skeleton_mask)
             logger.info(f"  Vessel graph extracted and saved in: {output_folder}")
         
         
@@ -178,7 +182,8 @@ def main():
         segmentation_folder=segmentation_folder,
         atlas_path=atlas_path,
         output_base_folder=output_base_folder,
-        skip_existing=skip_existing
+        skip_existing=skip_existing,
+        save_skeleton_mask=save_skeleton_mask
     )
     
     # Process files

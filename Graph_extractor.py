@@ -66,7 +66,7 @@ def laplacian_smooth_graph(graph, iterations, alpha):
     return graph
 
 
-def extract_graph(nifti_path, output_folder):
+def extract_graph(nifti_path, output_folder, save_skeleton_mask=False):
     """
     Runs the full graph extraction and alignment pipeline for a single file.
     """
@@ -79,6 +79,7 @@ def extract_graph(nifti_path, output_folder):
     # Define output filenames
     output_pkl = os.path.join(output_folder, "vessel_data.pkl")
     output_vtp = os.path.join(output_folder, "vessel_graph.vtp")
+    output_skeleton = os.path.join(output_folder, "vessel_skeleton_raw.nii.gz")
     
     if os.path.exists(output_pkl):
         print(f"  -> Output PKL already exists. Skipping case.")
@@ -102,6 +103,15 @@ def extract_graph(nifti_path, output_folder):
     # 3. SKELETONIZATION
     print("  Skeletonizing...")
     skeleton_mask = skeletonize(data > 0)
+    if save_skeleton_mask:
+        skeleton_img = nib.Nifti1Image(
+            skeleton_mask.astype(np.uint8),
+            affine=affine,
+            header=nii.header.copy()
+        )
+        skeleton_img.set_data_dtype(np.uint8)
+        nib.save(skeleton_img, output_skeleton)
+        print(f"    -> Saved raw skeleton: {output_skeleton}")
     skel_indices = np.argwhere(skeleton_mask)
     skel_points_world = apply_affine(affine, skel_indices)
     full_dist_map_vox = distance_transform_edt(data > 0)

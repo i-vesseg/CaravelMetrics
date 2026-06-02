@@ -1,0 +1,956 @@
+2026-05-12 15:44:58,233 - MainProcess - INFO - Found 2 files to process
+2026-05-12 15:44:58,233 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 15:44:58,233 - MainProcess - INFO - Using 2 parallel workers (total CPUs: 256)
+2026-05-12 15:44:58,233 - MainProcess - INFO - Chunk size: 1
+2026-05-12 15:44:58,257 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:44:58,257 - ForkPoolWorker-2 - INFO - Processing file: CCmaxi_4275.nii (OUTPUT: Results/CCmaxi_4275)
+2026-05-12 15:44:58,257 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:44:58,257 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:44:58,257 - ForkPoolWorker-2 - WARNING - Image file not found: CCmaxi_4275.nii
+2026-05-12 15:44:58,257 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_4275.nii
+2026-05-12 15:44:58,257 - ForkPoolWorker-1 - INFO - Processing file: CCmaxi_14907.nii (OUTPUT: Results/CCmaxi_14907)
+2026-05-12 15:44:58,257 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:44:58,257 - ForkPoolWorker-1 - WARNING - Image file not found: CCmaxi_14907.nii
+2026-05-12 15:44:58,257 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_14907.nii
+2026-05-12 15:45:02,047 - ForkPoolWorker-2 - ERROR - Failed to process CCmaxi_4275.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:45:02,048 - ForkPoolWorker-2 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 132, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:45:02,763 - ForkPoolWorker-1 - ERROR - Failed to process CCmaxi_14907.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:45:02,764 - ForkPoolWorker-1 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 132, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:45:02,888 - MainProcess - INFO - 
+============================================================
+2026-05-12 15:45:02,888 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 15:45:02,888 - MainProcess - INFO - ============================================================
+2026-05-12 15:45:02,888 - MainProcess - INFO - Successfully completed: 0/2
+2026-05-12 15:45:02,888 - MainProcess - INFO - Failed: 2/2
+2026-05-12 15:45:02,888 - MainProcess - ERROR - 
+Failed files:
+2026-05-12 15:45:02,888 - MainProcess - ERROR -   - CCmaxi_14907.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:45:02,888 - MainProcess - ERROR -   - CCmaxi_4275.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:45:02,888 - MainProcess - ERROR - 
+Check processing.log for detailed error information
+2026-05-12 15:45:02,888 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 15:45:02,888 - MainProcess - INFO - Log file: processing.log
+2026-05-12 15:52:47,724 - MainProcess - INFO - Found 14 files to process
+2026-05-12 15:52:47,724 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 15:52:47,724 - MainProcess - INFO - Using 14 parallel workers (total CPUs: 256)
+2026-05-12 15:52:47,724 - MainProcess - INFO - Chunk size: 1
+2026-05-12 15:52:47,824 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-1 - INFO - Processing file: sub004.nii (OUTPUT: Results/sub004)
+2026-05-12 15:52:47,824 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-1 - WARNING - Image file not found: sub004.nii
+2026-05-12 15:52:47,824 - ForkPoolWorker-2 - INFO - Processing file: sub005.nii (OUTPUT: Results/sub005)
+2026-05-12 15:52:47,824 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-3 - INFO - Processing file: sub007.nii (OUTPUT: Results/sub007)
+2026-05-12 15:52:47,824 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub004.nii
+2026-05-12 15:52:47,824 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-4 - INFO - Processing file: sub008.nii (OUTPUT: Results/sub008)
+2026-05-12 15:52:47,824 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:52:47,824 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-2 - WARNING - Image file not found: sub005.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-3 - WARNING - Image file not found: sub007.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-5 - INFO - Processing file: sub009.nii (OUTPUT: Results/sub009)
+2026-05-12 15:52:47,825 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub005.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-4 - WARNING - Image file not found: sub008.nii
+2026-05-12 15:52:47,824 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-3 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub007.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-4 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub008.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-6 - INFO - Processing file: sub012.nii (OUTPUT: Results/sub012)
+2026-05-12 15:52:47,825 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-5 - WARNING - Image file not found: sub009.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-7 - INFO - Processing file: sub014.nii (OUTPUT: Results/sub014)
+2026-05-12 15:52:47,825 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-8 - INFO - Processing file: sub015.nii (OUTPUT: Results/sub015)
+2026-05-12 15:52:47,825 - ForkPoolWorker-5 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub009.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-6 - WARNING - Image file not found: sub012.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-9 - INFO - Processing file: sub018.nii (OUTPUT: Results/sub018)
+2026-05-12 15:52:47,825 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-6 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub012.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:52:47,825 - ForkPoolWorker-7 - WARNING - Image file not found: sub014.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-8 - WARNING - Image file not found: sub015.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-7 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub014.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-9 - WARNING - Image file not found: sub018.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-8 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub015.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-9 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub018.nii
+2026-05-12 15:52:47,825 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-10 - INFO - Processing file: sub019.nii (OUTPUT: Results/sub019)
+2026-05-12 15:52:47,826 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-10 - WARNING - Image file not found: sub019.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-10 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub019.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-11 - INFO - Processing file: sub006.nii (OUTPUT: Results/sub006)
+2026-05-12 15:52:47,826 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-12 - INFO - Processing file: sub017.nii (OUTPUT: Results/sub017)
+2026-05-12 15:52:47,826 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-11 - WARNING - Image file not found: sub006.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:52:47,826 - ForkPoolWorker-11 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub006.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-13 - INFO - Processing file: sub011.nii (OUTPUT: Results/sub011)
+2026-05-12 15:52:47,826 - ForkPoolWorker-12 - WARNING - Image file not found: sub017.nii
+2026-05-12 15:52:47,826 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:52:47,827 - ForkPoolWorker-12 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub017.nii
+2026-05-12 15:52:47,827 - ForkPoolWorker-13 - WARNING - Image file not found: sub011.nii
+2026-05-12 15:52:47,827 - ForkPoolWorker-13 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub011.nii
+2026-05-12 15:52:47,827 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:52:47,827 - ForkPoolWorker-14 - INFO - Processing file: sub020.nii (OUTPUT: Results/sub020)
+2026-05-12 15:52:47,827 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:52:47,827 - ForkPoolWorker-14 - WARNING - Image file not found: sub020.nii
+2026-05-12 15:52:47,827 - ForkPoolWorker-14 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub020.nii
+2026-05-12 15:52:49,456 - ForkPoolWorker-4 - ERROR - Failed to process sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,458 - ForkPoolWorker-4 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,569 - ForkPoolWorker-10 - ERROR - Failed to process sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,571 - ForkPoolWorker-10 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,594 - ForkPoolWorker-13 - ERROR - Failed to process sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,595 - ForkPoolWorker-13 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,598 - ForkPoolWorker-14 - ERROR - Failed to process sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,599 - ForkPoolWorker-14 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,614 - ForkPoolWorker-3 - ERROR - Failed to process sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,616 - ForkPoolWorker-3 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,698 - ForkPoolWorker-9 - ERROR - Failed to process sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,700 - ForkPoolWorker-9 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,727 - ForkPoolWorker-6 - ERROR - Failed to process sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,730 - ForkPoolWorker-6 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,854 - ForkPoolWorker-11 - ERROR - Failed to process sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,856 - ForkPoolWorker-11 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,892 - ForkPoolWorker-2 - ERROR - Failed to process sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,893 - ForkPoolWorker-2 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,931 - ForkPoolWorker-7 - ERROR - Failed to process sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,932 - ForkPoolWorker-7 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,963 - ForkPoolWorker-12 - ERROR - Failed to process sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,964 - ForkPoolWorker-12 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:49,995 - ForkPoolWorker-8 - ERROR - Failed to process sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:49,996 - ForkPoolWorker-8 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:50,507 - ForkPoolWorker-5 - ERROR - Failed to process sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,508 - ForkPoolWorker-5 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:50,640 - ForkPoolWorker-1 - ERROR - Failed to process sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,641 - ForkPoolWorker-1 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:52:50,762 - MainProcess - INFO - 
+============================================================
+2026-05-12 15:52:50,762 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 15:52:50,762 - MainProcess - INFO - ============================================================
+2026-05-12 15:52:50,762 - MainProcess - INFO - Successfully completed: 0/14
+2026-05-12 15:52:50,762 - MainProcess - INFO - Failed: 14/14
+2026-05-12 15:52:50,762 - MainProcess - ERROR - 
+Failed files:
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,762 - MainProcess - ERROR -   - sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,763 - MainProcess - ERROR -   - sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,763 - MainProcess - ERROR -   - sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,763 - MainProcess - ERROR -   - sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:52:50,763 - MainProcess - ERROR - 
+Check processing.log for detailed error information
+2026-05-12 15:52:50,763 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 15:52:50,763 - MainProcess - INFO - Log file: processing.log
+2026-05-12 15:53:41,114 - MainProcess - INFO - Found 14 files to process
+2026-05-12 15:53:41,114 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 15:53:41,114 - MainProcess - INFO - Using 14 parallel workers (total CPUs: 256)
+2026-05-12 15:53:41,115 - MainProcess - INFO - Chunk size: 1
+2026-05-12 15:53:41,219 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:53:41,220 - ForkPoolWorker-1 - INFO - Processing file: sub004.nii (OUTPUT: Results/sub004)
+2026-05-12 15:53:41,220 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:53:41,220 - ForkPoolWorker-1 - WARNING - Image file not found: sub004.nii
+2026-05-12 15:53:41,220 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub004.nii
+2026-05-12 15:53:41,220 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:53:41,220 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:53:41,220 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:53:41,220 - ForkPoolWorker-2 - INFO - Processing file: sub005.nii (OUTPUT: Results/sub005)
+2026-05-12 15:53:41,221 - ForkPoolWorker-4 - INFO - Processing file: sub008.nii (OUTPUT: Results/sub008)
+2026-05-12 15:53:41,221 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-3 - INFO - Processing file: sub007.nii (OUTPUT: Results/sub007)
+2026-05-12 15:53:41,221 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-2 - WARNING - Image file not found: sub005.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-4 - WARNING - Image file not found: sub008.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub005.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-3 - WARNING - Image file not found: sub007.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-4 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub008.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-3 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub007.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-6 - INFO - Processing file: sub012.nii (OUTPUT: Results/sub012)
+2026-05-12 15:53:41,221 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-7 - INFO - Processing file: sub014.nii (OUTPUT: Results/sub014)
+2026-05-12 15:53:41,221 - ForkPoolWorker-6 - WARNING - Image file not found: sub012.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-6 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub012.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-7 - WARNING - Image file not found: sub014.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-7 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub014.nii
+2026-05-12 15:53:41,221 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:53:41,221 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-8 - INFO - Processing file: sub015.nii (OUTPUT: Results/sub015)
+2026-05-12 15:53:41,222 - ForkPoolWorker-5 - INFO - Processing file: sub009.nii (OUTPUT: Results/sub009)
+2026-05-12 15:53:41,222 - ForkPoolWorker-9 - INFO - Processing file: sub018.nii (OUTPUT: Results/sub018)
+2026-05-12 15:53:41,222 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-9 - WARNING - Image file not found: sub018.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-9 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub018.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-8 - WARNING - Image file not found: sub015.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-5 - WARNING - Image file not found: sub009.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-8 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub015.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-5 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub009.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-10 - INFO - Processing file: sub019.nii (OUTPUT: Results/sub019)
+2026-05-12 15:53:41,222 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-10 - WARNING - Image file not found: sub019.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-11 - INFO - Processing file: sub006.nii (OUTPUT: Results/sub006)
+2026-05-12 15:53:41,222 - ForkPoolWorker-10 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub019.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-11 - WARNING - Image file not found: sub006.nii
+2026-05-12 15:53:41,222 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-11 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub006.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-13 - INFO - Processing file: sub011.nii (OUTPUT: Results/sub011)
+2026-05-12 15:53:41,223 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:53:41,222 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:53:41,223 - ForkPoolWorker-13 - WARNING - Image file not found: sub011.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-12 - INFO - Processing file: sub017.nii (OUTPUT: Results/sub017)
+2026-05-12 15:53:41,223 - ForkPoolWorker-13 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub011.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-14 - INFO - Processing file: sub020.nii (OUTPUT: Results/sub020)
+2026-05-12 15:53:41,223 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:53:41,223 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:53:41,223 - ForkPoolWorker-12 - WARNING - Image file not found: sub017.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-14 - WARNING - Image file not found: sub020.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-12 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub017.nii
+2026-05-12 15:53:41,223 - ForkPoolWorker-14 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub020.nii
+2026-05-12 15:53:42,771 - ForkPoolWorker-5 - ERROR - Failed to process sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,772 - ForkPoolWorker-5 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,803 - ForkPoolWorker-12 - ERROR - Failed to process sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,804 - ForkPoolWorker-12 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,808 - ForkPoolWorker-13 - ERROR - Failed to process sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,809 - ForkPoolWorker-13 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,833 - ForkPoolWorker-4 - ERROR - Failed to process sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,834 - ForkPoolWorker-4 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,855 - ForkPoolWorker-9 - ERROR - Failed to process sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,857 - ForkPoolWorker-9 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,870 - ForkPoolWorker-7 - ERROR - Failed to process sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,872 - ForkPoolWorker-7 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,884 - ForkPoolWorker-1 - ERROR - Failed to process sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,886 - ForkPoolWorker-1 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,906 - ForkPoolWorker-14 - ERROR - Failed to process sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,908 - ForkPoolWorker-14 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,910 - ForkPoolWorker-8 - ERROR - Failed to process sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,912 - ForkPoolWorker-8 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:42,991 - ForkPoolWorker-2 - ERROR - Failed to process sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:42,992 - ForkPoolWorker-2 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:43,026 - ForkPoolWorker-3 - ERROR - Failed to process sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,027 - ForkPoolWorker-3 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:43,034 - ForkPoolWorker-11 - ERROR - Failed to process sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,035 - ForkPoolWorker-11 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:43,190 - ForkPoolWorker-10 - ERROR - Failed to process sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,191 - ForkPoolWorker-10 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:43,228 - ForkPoolWorker-6 - ERROR - Failed to process sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,230 - ForkPoolWorker-6 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:53:43,335 - MainProcess - INFO - 
+============================================================
+2026-05-12 15:53:43,336 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 15:53:43,336 - MainProcess - INFO - ============================================================
+2026-05-12 15:53:43,336 - MainProcess - INFO - Successfully completed: 0/14
+2026-05-12 15:53:43,336 - MainProcess - INFO - Failed: 14/14
+2026-05-12 15:53:43,336 - MainProcess - ERROR - 
+Failed files:
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,336 - MainProcess - ERROR -   - sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,337 - MainProcess - ERROR -   - sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,337 - MainProcess - ERROR -   - sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,337 - MainProcess - ERROR -   - sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,337 - MainProcess - ERROR -   - sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:53:43,337 - MainProcess - ERROR - 
+Check processing.log for detailed error information
+2026-05-12 15:53:43,337 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 15:53:43,337 - MainProcess - INFO - Log file: processing.log
+2026-05-12 15:54:14,899 - MainProcess - INFO - Found 14 files to process
+2026-05-12 15:54:14,900 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 15:54:14,900 - MainProcess - INFO - Using 14 parallel workers (total CPUs: 256)
+2026-05-12 15:54:14,900 - MainProcess - INFO - Chunk size: 1
+2026-05-12 15:54:14,983 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-1 - INFO - Processing file: sub004.nii (OUTPUT: Results/sub004)
+2026-05-12 15:54:14,984 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-4 - INFO - Processing file: sub008.nii (OUTPUT: Results/sub008)
+2026-05-12 15:54:14,984 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-2 - INFO - Processing file: sub005.nii (OUTPUT: Results/sub005)
+2026-05-12 15:54:14,984 - ForkPoolWorker-4 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-5 - INFO - Processing file: sub009.nii (OUTPUT: Results/sub009)
+2026-05-12 15:54:14,984 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-5 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-4 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub008.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-1 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub004.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-3 - INFO - Processing file: sub007.nii (OUTPUT: Results/sub007)
+2026-05-12 15:54:14,984 - ForkPoolWorker-6 - INFO - Processing file: sub012.nii (OUTPUT: Results/sub012)
+2026-05-12 15:54:14,984 - ForkPoolWorker-4 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub008.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-5 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub009.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-3 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-6 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-2 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub005.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub004.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-5 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub009.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-6 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub012.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-6 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub012.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub005.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-3 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub007.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-3 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub007.nii
+2026-05-12 15:54:14,984 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-7 - INFO - Processing file: sub014.nii (OUTPUT: Results/sub014)
+2026-05-12 15:54:14,984 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:54:14,984 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-7 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-9 - INFO - Processing file: sub018.nii (OUTPUT: Results/sub018)
+2026-05-12 15:54:14,985 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-8 - INFO - Processing file: sub015.nii (OUTPUT: Results/sub015)
+2026-05-12 15:54:14,985 - ForkPoolWorker-7 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub014.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-9 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-10 - INFO - Processing file: sub019.nii (OUTPUT: Results/sub019)
+2026-05-12 15:54:14,985 - ForkPoolWorker-8 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-10 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-7 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub014.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-9 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub018.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-8 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub015.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-10 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub019.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-8 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub015.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-9 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub018.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-11 - INFO - Processing file: sub006.nii (OUTPUT: Results/sub006)
+2026-05-12 15:54:14,985 - ForkPoolWorker-10 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub019.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-11 - INFO - ============================================================
+2026-05-12 15:54:14,985 - ForkPoolWorker-11 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub006.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-11 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub006.nii
+2026-05-12 15:54:14,985 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-12 - INFO - Processing file: sub017.nii (OUTPUT: Results/sub017)
+2026-05-12 15:54:14,986 - ForkPoolWorker-12 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-12 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub017.nii
+2026-05-12 15:54:14,986 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-12 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub017.nii
+2026-05-12 15:54:14,986 - ForkPoolWorker-14 - INFO - Processing file: sub020.nii (OUTPUT: Results/sub020)
+2026-05-12 15:54:14,986 - ForkPoolWorker-13 - INFO - Processing file: sub011.nii (OUTPUT: Results/sub011)
+2026-05-12 15:54:14,986 - ForkPoolWorker-14 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-13 - INFO - ============================================================
+2026-05-12 15:54:14,986 - ForkPoolWorker-13 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub011.nii
+2026-05-12 15:54:14,986 - ForkPoolWorker-14 - WARNING - Image file not found: /home/pentassu/data/SMILE_UHURA_Challenge/full/sub020.nii
+2026-05-12 15:54:14,986 - ForkPoolWorker-13 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub011.nii
+2026-05-12 15:54:14,986 - ForkPoolWorker-14 - INFO -   Starting VESSEL GRAPH EXTRACTION for: sub020.nii
+2026-05-12 15:54:16,483 - ForkPoolWorker-5 - ERROR - Failed to process sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,486 - ForkPoolWorker-5 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,532 - ForkPoolWorker-2 - ERROR - Failed to process sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,534 - ForkPoolWorker-2 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,546 - ForkPoolWorker-1 - ERROR - Failed to process sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,548 - ForkPoolWorker-1 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,596 - ForkPoolWorker-4 - ERROR - Failed to process sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,598 - ForkPoolWorker-4 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,612 - ForkPoolWorker-9 - ERROR - Failed to process sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,614 - ForkPoolWorker-9 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,629 - ForkPoolWorker-6 - ERROR - Failed to process sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,631 - ForkPoolWorker-6 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,674 - ForkPoolWorker-14 - ERROR - Failed to process sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,676 - ForkPoolWorker-14 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,701 - ForkPoolWorker-8 - ERROR - Failed to process sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,703 - ForkPoolWorker-8 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,727 - ForkPoolWorker-11 - ERROR - Failed to process sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,728 - ForkPoolWorker-11 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,758 - ForkPoolWorker-12 - ERROR - Failed to process sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,760 - ForkPoolWorker-12 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:16,841 - ForkPoolWorker-10 - ERROR - Failed to process sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:16,842 - ForkPoolWorker-10 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:17,041 - ForkPoolWorker-13 - ERROR - Failed to process sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,042 - ForkPoolWorker-13 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:17,214 - ForkPoolWorker-3 - ERROR - Failed to process sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,216 - ForkPoolWorker-3 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:17,293 - ForkPoolWorker-7 - ERROR - Failed to process sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,294 - ForkPoolWorker-7 - ERROR - Traceback (most recent call last):
+  File "/home/pentassu/projects/CaravelMetrics/CaravelMetrics.py", line 133, in process_single_file
+    extract_graph(mask_path, output_folder)
+  File "/home/pentassu/projects/CaravelMetrics/Graph_extractor.py", line 99, in extract_graph
+    mesh = vol.isosurface(value=0.5).apply_transform(affine)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pentassu/projects/CaravelMetrics/.venv/lib/python3.12/site-packages/vedo/core/points.py", line 39, in apply_transform
+    if cls.dataset.GetNumberOfPoints() == 0 or not LT:
+                                                   ^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+
+2026-05-12 15:54:17,397 - MainProcess - INFO - 
+============================================================
+2026-05-12 15:54:17,398 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 15:54:17,398 - MainProcess - INFO - ============================================================
+2026-05-12 15:54:17,398 - MainProcess - INFO - Successfully completed: 0/14
+2026-05-12 15:54:17,398 - MainProcess - INFO - Failed: 14/14
+2026-05-12 15:54:17,398 - MainProcess - ERROR - 
+Failed files:
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub004.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub005.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub007.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub008.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub009.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub012.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub014.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub015.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub018.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub019.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub006.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub017.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub011.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR -   - sub020.nii: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+2026-05-12 15:54:17,398 - MainProcess - ERROR - 
+Check processing.log for detailed error information
+2026-05-12 15:54:17,398 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 15:54:17,399 - MainProcess - INFO - Log file: processing.log
+2026-05-12 16:00:38,641 - MainProcess - INFO - Found 2 files to process
+2026-05-12 16:00:38,642 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 16:00:38,642 - MainProcess - INFO - Using 2 parallel workers (total CPUs: 256)
+2026-05-12 16:00:38,642 - MainProcess - INFO - Chunk size: 1
+2026-05-12 16:00:38,683 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:00:38,684 - ForkPoolWorker-2 - INFO - Processing file: CCmaxi_4275.nii (OUTPUT: Results/CCmaxi_4275)
+2026-05-12 16:00:38,684 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:00:38,684 - ForkPoolWorker-2 - WARNING - Image file not found: CCmaxi_4275.nii
+2026-05-12 16:00:38,684 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:00:38,684 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_4275.nii
+2026-05-12 16:00:38,684 - ForkPoolWorker-1 - INFO - Processing file: CCmaxi_14907.nii (OUTPUT: Results/CCmaxi_14907)
+2026-05-12 16:00:38,684 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:00:38,684 - ForkPoolWorker-1 - WARNING - Image file not found: CCmaxi_14907.nii
+2026-05-12 16:00:38,684 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_14907.nii
+2026-05-12 16:03:18,316 - ForkPoolWorker-1 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_14907
+2026-05-12 16:03:18,317 - ForkPoolWorker-1 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_14907.nii
+2026-05-12 16:03:18,552 - ForkPoolWorker-1 - INFO -   Metrics computed and saved in: Results/CCmaxi_14907
+2026-05-12 16:03:18,552 - ForkPoolWorker-1 - INFO - Successfully completed processing: CCmaxi_14907.nii
+2026-05-12 16:07:25,891 - ForkPoolWorker-2 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_4275
+2026-05-12 16:07:25,891 - ForkPoolWorker-2 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_4275.nii
+2026-05-12 16:07:26,128 - ForkPoolWorker-2 - INFO -   Metrics computed and saved in: Results/CCmaxi_4275
+2026-05-12 16:07:26,128 - ForkPoolWorker-2 - INFO - Successfully completed processing: CCmaxi_4275.nii
+2026-05-12 16:07:26,170 - MainProcess - INFO - 
+============================================================
+2026-05-12 16:07:26,170 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 16:07:26,170 - MainProcess - INFO - ============================================================
+2026-05-12 16:07:26,170 - MainProcess - INFO - Successfully completed: 2/2
+2026-05-12 16:07:26,170 - MainProcess - INFO - Failed: 0/2
+2026-05-12 16:07:26,170 - MainProcess - INFO - Success rate: 100.0%
+2026-05-12 16:07:26,170 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 16:07:26,170 - MainProcess - INFO - Log file: processing.log
+2026-05-12 16:17:36,165 - MainProcess - INFO - Found 2 files to process
+2026-05-12 16:17:36,166 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 16:17:36,166 - MainProcess - INFO - Using 2 parallel workers (total CPUs: 256)
+2026-05-12 16:17:36,166 - MainProcess - INFO - Chunk size: 1
+2026-05-12 16:17:36,193 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:17:36,193 - ForkPoolWorker-2 - INFO - Processing file: CCmaxi_4275.nii (OUTPUT: Results/CCmaxi_4275)
+2026-05-12 16:17:36,194 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:17:36,193 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:17:36,194 - ForkPoolWorker-2 - WARNING - Image file not found: CCmaxi_4275.nii
+2026-05-12 16:17:36,194 - ForkPoolWorker-1 - INFO - Processing file: CCmaxi_14907.nii (OUTPUT: Results/CCmaxi_14907)
+2026-05-12 16:17:36,194 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_4275.nii
+2026-05-12 16:17:36,194 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:17:36,194 - ForkPoolWorker-1 - WARNING - Image file not found: CCmaxi_14907.nii
+2026-05-12 16:17:36,194 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_14907.nii
+2026-05-12 16:20:22,166 - ForkPoolWorker-1 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_14907
+2026-05-12 16:20:22,166 - ForkPoolWorker-1 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_14907.nii
+2026-05-12 16:20:22,396 - ForkPoolWorker-1 - INFO -   Metrics computed and saved in: Results/CCmaxi_14907
+2026-05-12 16:20:22,396 - ForkPoolWorker-1 - INFO - Successfully completed processing: CCmaxi_14907.nii
+2026-05-12 16:24:22,410 - ForkPoolWorker-2 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_4275
+2026-05-12 16:24:22,410 - ForkPoolWorker-2 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_4275.nii
+2026-05-12 16:24:22,646 - ForkPoolWorker-2 - INFO -   Metrics computed and saved in: Results/CCmaxi_4275
+2026-05-12 16:24:22,646 - ForkPoolWorker-2 - INFO - Successfully completed processing: CCmaxi_4275.nii
+2026-05-12 16:24:22,682 - MainProcess - INFO - 
+============================================================
+2026-05-12 16:24:22,682 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 16:24:22,682 - MainProcess - INFO - ============================================================
+2026-05-12 16:24:22,682 - MainProcess - INFO - Successfully completed: 2/2
+2026-05-12 16:24:22,682 - MainProcess - INFO - Failed: 0/2
+2026-05-12 16:24:22,682 - MainProcess - INFO - Success rate: 100.0%
+2026-05-12 16:24:22,682 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 16:24:22,682 - MainProcess - INFO - Log file: processing.log
+2026-05-12 16:34:16,448 - MainProcess - INFO - Found 2 files to process
+2026-05-12 16:34:16,448 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-05-12 16:34:16,448 - MainProcess - INFO - Using 2 parallel workers (total CPUs: 256)
+2026-05-12 16:34:16,448 - MainProcess - INFO - Chunk size: 1
+2026-05-12 16:34:16,475 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:34:16,476 - ForkPoolWorker-2 - INFO - Processing file: CCmaxi_4275.nii (OUTPUT: Results/CCmaxi_4275)
+2026-05-12 16:34:16,476 - ForkPoolWorker-2 - INFO - ============================================================
+2026-05-12 16:34:16,476 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:34:16,476 - ForkPoolWorker-2 - WARNING - Image file not found: CCmaxi_4275.nii
+2026-05-12 16:34:16,476 - ForkPoolWorker-1 - INFO - Processing file: CCmaxi_14907.nii (OUTPUT: Results/CCmaxi_14907)
+2026-05-12 16:34:16,476 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_4275.nii
+2026-05-12 16:34:16,476 - ForkPoolWorker-1 - INFO - ============================================================
+2026-05-12 16:34:16,476 - ForkPoolWorker-1 - WARNING - Image file not found: CCmaxi_14907.nii
+2026-05-12 16:34:16,476 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_14907.nii
+2026-05-12 16:39:25,828 - ForkPoolWorker-1 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_14907
+2026-05-12 16:39:25,828 - ForkPoolWorker-1 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_14907.nii
+2026-05-12 16:39:26,058 - ForkPoolWorker-1 - INFO -   Metrics computed and saved in: Results/CCmaxi_14907
+2026-05-12 16:39:26,059 - ForkPoolWorker-1 - INFO - Successfully completed processing: CCmaxi_14907.nii
+2026-05-12 16:39:49,703 - ForkPoolWorker-2 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_4275
+2026-05-12 16:39:49,703 - ForkPoolWorker-2 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_4275.nii
+2026-05-12 16:39:49,939 - ForkPoolWorker-2 - INFO -   Metrics computed and saved in: Results/CCmaxi_4275
+2026-05-12 16:39:49,939 - ForkPoolWorker-2 - INFO - Successfully completed processing: CCmaxi_4275.nii
+2026-05-12 16:39:49,972 - MainProcess - INFO - 
+============================================================
+2026-05-12 16:39:49,972 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-05-12 16:39:49,973 - MainProcess - INFO - ============================================================
+2026-05-12 16:39:49,973 - MainProcess - INFO - Successfully completed: 2/2
+2026-05-12 16:39:49,973 - MainProcess - INFO - Failed: 0/2
+2026-05-12 16:39:49,973 - MainProcess - INFO - Success rate: 100.0%
+2026-05-12 16:39:49,973 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-05-12 16:39:49,973 - MainProcess - INFO - Log file: processing.log
