@@ -19,6 +19,7 @@ ARGUMENTS:
     --output_folder  (optional) Path to save results. Default is './VESSEL METRICS'.
 """
 import argparse
+import json
 import os
 from collections import defaultdict
 
@@ -34,7 +35,42 @@ from sklearn.linear_model import LinearRegression
 import pickle
 import SimpleITK as sitk
 import vedo
+import vtk
 from pathlib import Path
+
+
+ROOT_CRITERIA = [
+    {
+        'id': 1,
+        'key': 'largest_endpoint',
+        'name': 'Largest endpoint root',
+        'prefix': 'Largest_endpoint_root_',
+    },
+    {
+        'id': 2,
+        'key': 'second_largest_endpoint',
+        'name': 'Second largest endpoint root',
+        'prefix': '2nd_Largest_endpoint_root_',
+    },
+    {
+        'id': 3,
+        'key': 'largest_bifurcation',
+        'name': 'Largest bifurcation root',
+        'prefix': 'Largest_bifurcation_root_',
+    },
+]
+
+SEGMENT_METRIC_KEYS = [
+    'geodesic_length',
+    'avg_diameter',
+    'spline_arc_length',
+    'spline_chord_length',
+    'spline_mean_curvature',
+    'spline_mean_square_curvature',
+    'spline_rms_curvature',
+    'arc_over_chord',
+    'fit_rmse',
+]
 
 
 def load_label_map(txt_path):
@@ -249,62 +285,53 @@ def analyze_component_structure(G_comp):
     return num_loops, num_abnormal_degree_nodes
 
 
+def _build_root_info(criterion, root, distance_map, fallback=False):
+    diameter = None if root is None else 2 * distance_map.get(root, 0.5)
+    return {
+        'root_criterion_id': criterion['id'],
+        'root_criterion_key': criterion['key'],
+        'root_criterion_name': criterion['name'],
+        'root_node': root,
+        'root_diameter': diameter,
+        'fallback_root': fallback,
+    }
+
+
 def extract_segments_from_component_using_shortest_path(G_comp, distance_map):
     """
     From the connected component G_comp, identify all endpoints (degree == 1)
-    and select three roots:
-      1. Endpoint with the largest diameter
-      2. Endpoint with the second-largest diameter
-      3. Bifurcation node (degree >= 3) with the largest diameter
-
-    Then, compute shortest-path segments from each root to all other endpoints,
-    and for each root, return both:
-      - A list of shortest-path segments (each a list of nodes) from the root
-        to every other endpoint.
-      - A mapping from each node to the number of times it appears across those segments.
-
-    Parameters:
-      G_comp : networkx.Graph
-          A subgraph representing a connected component.
-      distance_map : dict-like
-          Mapping from node (as tuple) to its radius value (in same units as graph coords).
-
-    Returns:
-      segment_lists : List[List[List[node]]]
-          A list of three lists, each containing shortest-path segments
-          (node lists) from one selected root to every other endpoint.
-      segment_counts : List[Dict[node, int]]
-          A list of three dictionaries, each corresponding to one selected root.
-          Each dictionary maps nodes to their frequency of occurrence in all
-          shortest-path segments from that root to every other endpoint.
+    and select all three current root criteria. It returns root-to-endpoint
+    shortest-path segments, path-multiplicity counts, and root metadata.
     """
-    # Identify endpoints (degree == 1)
     endpoints = [node for node, deg in G_comp.degree() if deg == 1]
     if not endpoints:
-        return [[], [], []], [{}, {}, {}]
+        root_infos = [_build_root_info(c, None, distance_map) for c in ROOT_CRITERIA]
+        return [[], [], []], [{}, {}, {}], root_infos
 
-    # Diameter at a node = 2 * radius
     diameters_eps = {node: 2 * distance_map.get(node, 0.5) for node in endpoints}
-    # Sort endpoints by diameter descending
     sorted_eps = sorted(endpoints, key=lambda n: diameters_eps[n], reverse=True)
 
-    # First two roots: largest and second-largest diameter endpoints
     root1 = sorted_eps[0]
     root2 = sorted_eps[1] if len(sorted_eps) > 1 else root1
 
-    # Third root: bifurcation (degree >= 3) with largest diameter, or fallback
     bif_nodes = [node for node, deg in G_comp.degree() if deg >= 3]
     if bif_nodes:
         diameters_bif = {node: 2 * distance_map.get(node, 0.5) for node in bif_nodes}
         root3 = max(bif_nodes, key=lambda n: diameters_bif[n])
+        root3_is_fallback = False
     else:
         root3 = root1
+        root3_is_fallback = True
 
     roots = [root1, root2, root3]
+    root_infos = [
+        _build_root_info(ROOT_CRITERIA[0], root1, distance_map),
+        _build_root_info(ROOT_CRITERIA[1], root2, distance_map, fallback=(root2 == root1 and len(sorted_eps) == 1)),
+        _build_root_info(ROOT_CRITERIA[2], root3, distance_map, fallback=root3_is_fallback),
+    ]
     segment_lists = []
     segment_counts_list = []
 
-    # For each selected root, compute segments and counts
     for root in roots:
         segs = []
         counts = defaultdict(int)
@@ -316,13 +343,194 @@ def extract_segments_from_component_using_shortest_path(G_comp, distance_map):
             except nx.NetworkXNoPath:
                 continue
             segs.append(path)
-            # Count occurrences of each node along the path
             for node in path:
                 counts[node] += 1
         segment_lists.append(segs)
         segment_counts_list.append(dict(counts))
 
-    return segment_lists, segment_counts_list
+    return segment_lists, segment_counts_list, root_infos
+
+
+def _to_python_scalar(value):
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    return _to_python_scalar(value)
+
+
+def _node_to_json(node):
+    return _json_safe(node)
+
+
+def _node_to_csv(node):
+    if isinstance(node, (list, tuple, np.ndarray)):
+        return json.dumps(_json_safe(node))
+    return _to_python_scalar(node)
+
+
+def _node_to_vtp_id(node):
+    try:
+        return int(node)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _region_to_vtp_id(region_label):
+    try:
+        return int(region_label)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _metric_value(metrics, key):
+    return _to_python_scalar(metrics.get(key)) if key in metrics else None
+
+
+def _format_node_path(node_path):
+    return ';'.join(str(_node_to_csv(n)) for n in node_path)
+
+
+def _build_segment_definition(segment_uid, region_label, component_index, original_component_id, root_entry, segment_entry, metrics):
+    node_path = segment_entry.get('node_path', [])
+    point_path = segment_entry.get('point_path', [])
+    edge_path = [[node_path[i], node_path[i + 1]] for i in range(max(0, len(node_path) - 1))]
+    return {
+        'segment_uid': segment_uid,
+        'region_label': _json_safe(region_label),
+        'component_index': component_index,
+        'original_component_id': _json_safe(original_component_id),
+        'root_criterion_id': root_entry.get('root_criterion_id'),
+        'root_criterion_key': root_entry.get('root_criterion_key'),
+        'root_criterion_name': root_entry.get('root_criterion_name'),
+        'segment_index': segment_entry.get('segment_index'),
+        'root_node': _node_to_json(segment_entry.get('root_node')),
+        'endpoint_node': _node_to_json(segment_entry.get('endpoint_node')),
+        'root_diameter': _json_safe(root_entry.get('root_diameter')),
+        'fallback_root': bool(root_entry.get('fallback_root', False)),
+        'node_path': _json_safe(node_path),
+        'edge_path': _json_safe(edge_path),
+        'point_path': _json_safe(point_path),
+        'node_count': len(node_path),
+        'edge_count': max(0, len(node_path) - 1),
+        'point_count': len(point_path),
+        'metrics': _json_safe(metrics),
+    }
+
+
+def _segment_definition_csv_rows(segment_definitions):
+    rows = []
+    for definition in segment_definitions:
+        metrics = definition.get('metrics', {})
+        row = {
+            'segment_uid': definition.get('segment_uid'),
+            'region_label': definition.get('region_label'),
+            'component_index': definition.get('component_index'),
+            'original_component_id': definition.get('original_component_id'),
+            'root_criterion_id': definition.get('root_criterion_id'),
+            'root_criterion_key': definition.get('root_criterion_key'),
+            'root_criterion_name': definition.get('root_criterion_name'),
+            'segment_index': definition.get('segment_index'),
+            'root_node': _node_to_csv(definition.get('root_node')),
+            'endpoint_node': _node_to_csv(definition.get('endpoint_node')),
+            'root_diameter': definition.get('root_diameter'),
+            'fallback_root': definition.get('fallback_root'),
+            'node_count': definition.get('node_count'),
+            'edge_count': definition.get('edge_count'),
+            'point_count': definition.get('point_count'),
+            'node_path': _format_node_path(definition.get('node_path', [])),
+        }
+        for key in SEGMENT_METRIC_KEYS:
+            row[key] = _metric_value(metrics, key)
+        rows.append(row)
+    return rows
+
+
+def _write_segment_vtp(segment_definitions, output_path):
+    points = vtk.vtkPoints()
+    lines = vtk.vtkCellArray()
+    array_names = [
+        'SegmentUID', 'SegmentIndex', 'RootCriterionID', 'RegionLabel',
+        'ComponentIndex', 'OriginalComponentID', 'RootNodeID', 'EndpointNodeID',
+    ]
+    arrays = {}
+    for name in array_names:
+        arr = vtk.vtkIntArray()
+        arr.SetName(name)
+        arrays[name] = arr
+
+    for definition in segment_definitions:
+        point_path = definition.get('point_path', [])
+        if len(point_path) < 2:
+            continue
+        polyline = vtk.vtkPolyLine()
+        polyline.GetPointIds().SetNumberOfIds(len(point_path))
+        for i, point in enumerate(point_path):
+            point_id = points.InsertNextPoint(float(point[0]), float(point[1]), float(point[2]))
+            polyline.GetPointIds().SetId(i, point_id)
+        lines.InsertNextCell(polyline)
+        arrays['SegmentUID'].InsertNextValue(int(definition.get('segment_uid', -1)))
+        arrays['SegmentIndex'].InsertNextValue(int(definition.get('segment_index', -1)))
+        arrays['RootCriterionID'].InsertNextValue(int(definition.get('root_criterion_id', -1)))
+        arrays['RegionLabel'].InsertNextValue(_region_to_vtp_id(definition.get('region_label')))
+        arrays['ComponentIndex'].InsertNextValue(int(definition.get('component_index', -1)))
+        arrays['OriginalComponentID'].InsertNextValue(_node_to_vtp_id(definition.get('original_component_id')))
+        arrays['RootNodeID'].InsertNextValue(_node_to_vtp_id(definition.get('root_node')))
+        arrays['EndpointNodeID'].InsertNextValue(_node_to_vtp_id(definition.get('endpoint_node')))
+
+    poly_data = vtk.vtkPolyData()
+    poly_data.SetPoints(points)
+    poly_data.SetLines(lines)
+    for arr in arrays.values():
+        poly_data.GetCellData().AddArray(arr)
+    poly_data.GetCellData().SetActiveScalars('SegmentUID')
+
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetFileName(output_path)
+    writer.SetInputData(poly_data)
+    writer.Write()
+
+
+def _write_segment_definition_outputs(output_folder, segment_definitions):
+    package = {
+        'schema_version': 1,
+        'root_criteria': ROOT_CRITERIA,
+        'segments': segment_definitions,
+    }
+    json_path = os.path.join(output_folder, 'segment_definitions.json')
+    csv_path = os.path.join(output_folder, 'segment_definitions.csv')
+    pkl_path = os.path.join(output_folder, 'segment_definitions.pkl')
+    vtp_path = os.path.join(output_folder, 'vessel_segments.vtp')
+
+    with open(json_path, 'w') as f:
+        json.dump(_json_safe(package), f, indent=2, allow_nan=False)
+
+    csv_columns = [
+        'segment_uid', 'region_label', 'component_index', 'original_component_id',
+        'root_criterion_id', 'root_criterion_key', 'root_criterion_name',
+        'segment_index', 'root_node', 'endpoint_node', 'root_diameter',
+        'fallback_root', 'node_count', 'edge_count', 'point_count', 'node_path',
+    ] + SEGMENT_METRIC_KEYS
+    pd.DataFrame(_segment_definition_csv_rows(segment_definitions), columns=csv_columns).to_csv(csv_path, index=False)
+
+    with open(pkl_path, 'wb') as f:
+        pickle.dump(package, f)
+
+    _write_segment_vtp(segment_definitions, vtp_path)
+    print(f"  Saved segment definitions: {json_path}")
+    print(f"  Saved segment definition index: {csv_path}")
+    print(f"  Saved segment definition PKL: {pkl_path}")
+    print(f"  Saved segment VTP: {vtp_path}")
 
 def save_results(results, output_folder, save_segment_masks, save_conn_comp_masks):
 
@@ -335,8 +543,9 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
 
     all_rows = []
     region_rows = []
+    segment_definitions = []
+    segment_uid = 1
 
-    # Extract regions
     if 'region_metrics' in results:
         region_results = results['region_metrics']
     else:
@@ -345,13 +554,11 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
 
     for region_label, region_data in region_results.items():
         if not isinstance(region_data, dict):
-            continue  # safety
+            continue
         components = {
             k: v for k, v in region_data.items()
-            if isinstance(v, dict) and 'total_length' in v
+            if isinstance(v, dict) and ('total_length' in v or 'segments_by_root' in v)
         }
-
-        # Sort by length
         sorted_items = sorted(
             components.items(),
             key=lambda item: item[1].get('total_length', 0),
@@ -372,14 +579,9 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
             for k in general_keys:
                 row[k] = data.get(k, np.nan)
 
-            # Tortuosity
             agg = data.get('aggregated_tortuosity_by_root', [])
-            prefixes = [
-                'Largest_endpoint_root_',
-                '2nd_Largest_endpoint_root_',
-                'Largest_bifurcation_root_'
-            ]
-            for i, prefix in enumerate(prefixes):
+            for i, criterion in enumerate(ROOT_CRITERIA):
+                prefix = criterion['prefix']
                 if i < len(agg):
                     row[prefix + 'mean_curvature'] = agg[i].get('mean_curvature', np.nan)
                     row[prefix + 'mean_square_curvature'] = agg[i].get('mean_square_curvature', np.nan)
@@ -390,47 +592,45 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
             all_rows.append({k: v for k, v in row.items() if k != 'region_label'})
             region_rows.append(row)
 
-            # Save skeleton
             if save_conn_comp_masks:
                 nib.save(
                     data['reconstructed_conn_comp'],
                     os.path.join(comp_dir, f'Conn_comp_{comp_idx}_skeleton.nii.gz')
                 )
 
-            # Save segments
             if 'segments_by_root' in data:
                 segs_dir = os.path.join(comp_dir, 'Segments')
                 os.makedirs(segs_dir, exist_ok=True)
-                root_names = [
-                    'Largest endpoint root',
-                    'Second largest endpoint root',
-                    'Largest bifurcation root'
-                ]
                 for root_idx, root_entry in enumerate(data['segments_by_root']):
-                    if root_idx >= len(root_names):
+                    if root_idx >= len(ROOT_CRITERIA):
                         break
-
-                    root_dir = os.path.join(segs_dir, root_names[root_idx])
+                    root_dir = os.path.join(segs_dir, root_entry.get('root_criterion_name', ROOT_CRITERIA[root_idx]['name']))
                     os.makedirs(root_dir, exist_ok=True)
 
                     metrics_list = root_entry.get('segment_metrics', [])
+                    segment_entries = root_entry.get('segments', [])
                     masks_list = root_entry.get('segment_masks', []) if save_segment_masks else []
 
                     for seg_idx, sm in enumerate(metrics_list, start=1):
                         seg_dir = os.path.join(root_dir, f"Segment_{seg_idx}")
                         os.makedirs(seg_dir, exist_ok=True)
-
                         pd.DataFrame([sm]).to_csv(
                             os.path.join(seg_dir, 'Segment_metrics.csv'), index=False
                         )
-
                         if save_segment_masks and seg_idx - 1 < len(masks_list):
                             nib.save(
                                 masks_list[seg_idx - 1],
                                 os.path.join(seg_dir, 'Segment.nii.gz')
                             )
 
-    # === Per-region/component CSV ===
+                    for segment_entry in segment_entries:
+                        seg_idx = segment_entry.get('segment_index', 0)
+                        metrics = metrics_list[seg_idx - 1] if 0 < seg_idx <= len(metrics_list) else {}
+                        segment_definitions.append(_build_segment_definition(
+                            segment_uid, region_label, comp_idx, cid, root_entry, segment_entry, metrics
+                        ))
+                        segment_uid += 1
+
     if region_rows:
         df_detailed = pd.DataFrame(region_rows)
         df_detailed = df_detailed.drop(columns=['component_index', 'original_component_id'], errors='ignore')
@@ -444,29 +644,23 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
             index=False
         )
 
-        # === Region Summary ===
         summary_metrics = [
             'total_length', 'num_bifurcations', 'volume', 'num_loops', 'num_abnormal_degree_nodes'
         ]
-
-        tortuosity_cols = [
-            'Largest_endpoint_root_mean_curvature',
-            'Largest_endpoint_root_mean_square_curvature',
-            '2nd_Largest_endpoint_root_mean_curvature',
-            '2nd_Largest_endpoint_root_mean_square_curvature',
-            'Largest_bifurcation_root_mean_curvature',
-            'Largest_bifurcation_root_mean_square_curvature'
-        ]
+        tortuosity_cols = []
+        for criterion in ROOT_CRITERIA:
+            tortuosity_cols.extend([
+                criterion['prefix'] + 'mean_curvature',
+                criterion['prefix'] + 'mean_square_curvature',
+            ])
 
         region_groups = df_detailed.groupby('region_label')
         summary_rows = []
-
         for region_label, group in region_groups:
             row = {
                 'region_label': region_label,
                 'num_components': len(group)
             }
-
             for metric in summary_metrics:
                 row[metric] = group[metric].sum()
 
@@ -479,11 +673,9 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
                 else:
                     row[col] = np.nan
 
-            
             region_data = region_results.get(region_label, {})
             for b in ['betti_0', 'betti_1', 'betti_2']:
                 row[b] = region_data.get(b, np.nan)
-
             summary_rows.append(row)
 
         df_summary = pd.DataFrame(summary_rows)
@@ -493,10 +685,12 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
             index=False
         )
 
+    _write_segment_definition_outputs(output_folder, segment_definitions)
     print(f"Results saved to: {output_folder}")
 
     
     
+
 def compute_metrics_for_mask(G, node_radius_map, selected_metrics, save_segment_masks=None, save_conn_comp_masks=None):
     results = {}
     for cid, comp_nodes in enumerate(nx.connected_components(G)):
@@ -541,68 +735,72 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics, save_segment_
             if 'num_abnormal_degree_nodes' in selected_metrics:
                 data['num_abnormal_degree_nodes'] = nab
 
-        if any(m in selected_metrics for m in [
-            'geodesic_length', 'avg_diameter', 'spline_mean_curvature', 'spline_mean_square_curvature'
-        ]):
-            seg_lists, seg_counts = extract_segments_from_component_using_shortest_path(Gc, node_radius_map)
-            segments_info = []
-            agg_curv = []
-            agg_curv2 = []
-            
-            for r_idx, seg_list in enumerate(seg_lists):
-                seg_metrics = []
-                seg_masks = []
-                total_geo = 0.0
-                sum_curv = 0.0
-                sum_curv2 = 0.0
+        seg_lists, seg_counts, root_infos = extract_segments_from_component_using_shortest_path(Gc, node_radius_map)
+        segments_info = []
+        agg_curv = []
+        agg_curv2 = []
+        compute_segment_metrics = any(m in selected_metrics for m in SEGMENT_METRIC_KEYS)
+        compute_tortuosity = compute_segment_metrics
+        
+        for r_idx, seg_list in enumerate(seg_lists):
+            seg_metrics = []
+            seg_masks = []
+            segment_entries = []
+            total_geo = 0.0
+            sum_curv = 0.0
+            sum_curv2 = 0.0
+            root_info = root_infos[r_idx] if r_idx < len(root_infos) else _build_root_info(ROOT_CRITERIA[r_idx], None, node_radius_map)
 
-                for seg in seg_list:
-                    pts = np.array([Gc.nodes[n]['pos'] for n in seg])
-                    sm = {}
+            for seg_idx, seg in enumerate(seg_list, start=1):
+                pts = np.array([Gc.nodes[n]['pos'] for n in seg])
+                sm = {}
+                L_geo = sum(np.linalg.norm(pts[i] - pts[i+1]) for i in range(len(pts)-1))
+                sm['geodesic_length'] = L_geo
+                total_geo += L_geo
+                sm['avg_diameter'] = np.mean([2 * node_radius_map.get(n, 0.5) for n in seg])
 
-                    L_geo = sum(np.linalg.norm(pts[i] - pts[i+1]) for i in range(len(pts)-1))
-                    sm['geodesic_length'] = L_geo
-                    total_geo += L_geo
-
-                    if 'avg_diameter' in selected_metrics:
-                        sm['avg_diameter'] = np.mean([2 * node_radius_map.get(n, 0.5) for n in seg])
-                        
+                if compute_tortuosity:
                     counts_arr = np.array([seg_counts[r_idx].get(n, 1) for n in seg])
                     tort = compute_tortuosity_metrics(pts, smoothing=0, n_samples=500, counts=counts_arr)
                     sm.update(tort)
-
-                    if 'spline_mean_curvature' in selected_metrics:
-                        sm['spline_mean_curvature'] = tort['spline_mean_curvature']
-                        # Only add to total if value is valid (not NaN)
-                        if not np.isnan(tort['spline_mean_curvature']):
-                            sum_curv += tort['spline_mean_curvature'] * L_geo
-                            
-                    if 'spline_mean_square_curvature' in selected_metrics:
-                        sm['spline_mean_square_curvature'] = tort['spline_mean_square_curvature']
-                        # Only add to total if value is valid
-                        if not np.isnan(tort['spline_mean_square_curvature']):
-                            sum_curv2 += tort['spline_mean_square_curvature'] * L_geo
-                            
-                    seg_metrics.append(sm)
-
-                if total_geo > 0:
-                    agg_curv.append(sum_curv/total_geo)
-                    agg_curv2.append(sum_curv2/total_geo)
+                    if not np.isnan(tort['spline_mean_curvature']):
+                        sum_curv += tort['spline_mean_curvature'] * L_geo
+                    if not np.isnan(tort['spline_mean_square_curvature']):
+                        sum_curv2 += tort['spline_mean_square_curvature'] * L_geo
                 else:
-                    agg_curv.append(np.nan)
-                    agg_curv2.append(np.nan)
+                    for key in SEGMENT_METRIC_KEYS:
+                        if key not in sm:
+                            sm[key] = np.nan
 
-                segments_info.append({
-                    'segment_metrics': seg_metrics,
-                    'segment_masks': seg_masks
+                seg_metrics.append(sm)
+                segment_entries.append({
+                    'segment_index': seg_idx,
+                    'root_node': seg[0] if seg else None,
+                    'endpoint_node': seg[-1] if seg else None,
+                    'node_path': list(seg),
+                    'point_path': pts.tolist(),
                 })
 
-            data['segments_by_root'] = segments_info
-            data['aggregated_tortuosity_by_root'] = [
-                {'mean_curvature': agg_curv[i],
-                 'mean_square_curvature': agg_curv2[i]}
-                for i in range(len(agg_curv))
-            ]
+            if total_geo > 0 and compute_tortuosity:
+                agg_curv.append(sum_curv/total_geo)
+                agg_curv2.append(sum_curv2/total_geo)
+            else:
+                agg_curv.append(np.nan)
+                agg_curv2.append(np.nan)
+
+            segments_info.append({
+                **root_info,
+                'segment_metrics': seg_metrics,
+                'segment_masks': seg_masks,
+                'segments': segment_entries,
+            })
+
+        data['segments_by_root'] = segments_info
+        data['aggregated_tortuosity_by_root'] = [
+            {'mean_curvature': agg_curv[i],
+             'mean_square_curvature': agg_curv2[i]}
+            for i in range(len(agg_curv))
+        ]
 
         results[cid] = data
 
