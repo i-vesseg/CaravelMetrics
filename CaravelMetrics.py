@@ -2,6 +2,8 @@ import os
 import sys
 import traceback
 import logging
+import csv
+import time
 from pathlib import Path
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count, Manager
@@ -72,9 +74,81 @@ if invalid:
     raise ValueError(f"Invalid metrics requested: {invalid}")
 
 
+TIMING_COLUMNS = [
+    'file',
+    'status',
+    'error',
+    'total_seconds',
+    'atlas_seconds',
+    'graph_seconds',
+    'metrics_seconds',
+    'atlas_status',
+    'graph_status',
+    'metrics_status',
+]
+
+
+def _new_timing_result(fname):
+    return {
+        'file': fname,
+        'status': 'failed',
+        'error': '',
+        'total_seconds': 0.0,
+        'atlas_seconds': 0.0,
+        'graph_seconds': 0.0,
+        'metrics_seconds': 0.0,
+        'atlas_status': 'disabled' if not use_atlas else 'not_started',
+        'graph_status': 'not_started',
+        'metrics_status': 'not_started',
+    }
+
+
+def _elapsed_seconds(start_time):
+    return time.perf_counter() - start_time
+
+
+def _write_processing_times(results, output_base_folder):
+    Path(output_base_folder).mkdir(parents=True, exist_ok=True)
+    timing_path = os.path.join(output_base_folder, 'processing_times.csv')
+    with open(timing_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=TIMING_COLUMNS)
+        writer.writeheader()
+        for result in results:
+            row = {col: result.get(col, '') for col in TIMING_COLUMNS}
+            for col in ['total_seconds', 'atlas_seconds', 'graph_seconds', 'metrics_seconds']:
+                value = row[col]
+                row[col] = f"{float(value):.6f}" if isinstance(value, (int, float)) else value
+            writer.writerow(row)
+    logger.info(f"Timing CSV saved to: {timing_path}")
+    return timing_path
+
+
+def _mean_seconds(results, key):
+    values = [float(r.get(key, 0.0)) for r in results if r.get('status') == 'completed']
+    return sum(values) / len(values) if values else None
+
+
+def _log_timing_summary(results, wall_time_seconds):
+    completed_results = [r for r in results if r.get('status') == 'completed']
+    logger.info("\nTIMING SUMMARY:")
+    logger.info(f"Whole execution wall time: {wall_time_seconds:.2f}s")
+
+    if not completed_results:
+        logger.info("No completed files; average timings not available.")
+        return
+
+    logger.info(f"Average per completed input file: {_mean_seconds(results, 'total_seconds'):.2f}s")
+    if use_atlas:
+        logger.info(f"Average atlas registration time: {_mean_seconds(results, 'atlas_seconds'):.2f}s")
+    logger.info(f"Average graph extraction time: {_mean_seconds(results, 'graph_seconds'):.2f}s")
+    logger.info(f"Average metrics computation time: {_mean_seconds(results, 'metrics_seconds'):.2f}s")
+
+
 def process_single_file(fname, image_folder, t1_image_folder, segmentation_folder, atlas_path, output_base_folder, skip_existing, save_skeleton_mask):
     """Process a single segmentation file with comprehensive error handling"""
-    
+    file_start = time.perf_counter()
+    timing_result = _new_timing_result(fname)
+
     try:
         # Remove double extensions (e.g., .nii.gz, .tar.gz) or single extensions
         patient_name = fname
@@ -116,11 +190,21 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
                 logger.warning(f"T1 image file not found: {t1_image_path}")
         
             registered_atlas_path = os.path.join(output_folder, f"{t1_patient_name}_registered_atlas.nii.gz")
+            stage_start = time.perf_counter()
             if skip_existing and os.path.exists(registered_atlas_path):
                 logger.info(f"  Skipped ATLAS REGISTRATION: {fname} (output already exists)")
+                timing_result['atlas_status'] = 'skipped'
+                timing_result['atlas_seconds'] = 0.0
             else:
                 logger.info(f"  Starting ATLAS REGISTRATION for: {fname}")
-                process_registration(image_path, t1_image_path, mask_path, atlas_path, output_folder)
+                try:
+                    process_registration(image_path, t1_image_path, mask_path, atlas_path, output_folder)
+                except Exception:
+                    timing_result['atlas_seconds'] = _elapsed_seconds(stage_start)
+                    timing_result['atlas_status'] = 'failed'
+                    raise
+                timing_result['atlas_seconds'] = _elapsed_seconds(stage_start)
+                timing_result['atlas_status'] = 'completed'
                 logger.info(f"  REGISTERED ATLAS saved at: {registered_atlas_path}")
     
     
@@ -129,11 +213,21 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
         #=====================================================================================================#
         
         graph_pkl_path = os.path.join(output_folder, "vessel_data.pkl")
+        stage_start = time.perf_counter()
         if skip_existing and os.path.exists(graph_pkl_path):
             logger.info(f"  Skipped VESSEL GRAPH EXTRACTION: {fname} (output already exists)")
+            timing_result['graph_status'] = 'skipped'
+            timing_result['graph_seconds'] = 0.0
         else:
             logger.info(f"  Starting VESSEL GRAPH EXTRACTION for: {fname}")
-            extract_graph(mask_path, output_folder, save_skeleton_mask=save_skeleton_mask)
+            try:
+                extract_graph(mask_path, output_folder, save_skeleton_mask=save_skeleton_mask)
+            except Exception:
+                timing_result['graph_seconds'] = _elapsed_seconds(stage_start)
+                timing_result['graph_status'] = 'failed'
+                raise
+            timing_result['graph_seconds'] = _elapsed_seconds(stage_start)
+            timing_result['graph_status'] = 'completed'
             logger.info(f"  Vessel graph extracted and saved in: {output_folder}")
         
         
@@ -144,26 +238,43 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
         output_global_folder = os.path.join(parent + ("_GLOBAL"), child)
         metrics_output_path = os.path.join(output_folder, "all_components_by_region.csv") if use_atlas else os.path.join(output_global_folder, "all_components_by_region.csv")
         
+        stage_start = time.perf_counter()
         if skip_existing and os.path.exists(metrics_output_path):
             logger.info(f"  Skipped METRICS COMPUTATION: {fname} (output already exists)")
+            timing_result['metrics_status'] = 'skipped'
+            timing_result['metrics_seconds'] = 0.0
         else:
             logger.info(f"  Starting METRICS COMPUTATION for: {fname}")
-            extract_metrics(patient_name, output_folder, graph_pkl_path, selected_metrics, label_map_path, registered_atlas_path=registered_atlas_path if use_atlas else None)
+            try:
+                extract_metrics(patient_name, output_folder, graph_pkl_path, selected_metrics, label_map_path, registered_atlas_path=registered_atlas_path if use_atlas else None)
+            except Exception:
+                timing_result['metrics_seconds'] = _elapsed_seconds(stage_start)
+                timing_result['metrics_status'] = 'failed'
+                raise
+            timing_result['metrics_seconds'] = _elapsed_seconds(stage_start)
+            timing_result['metrics_status'] = 'completed'
             logger.info(f"  Metrics computed and saved in: {output_folder}")
         
         #=====================================================================================================#
         #                                      4 - Done
         #=====================================================================================================#
-        logger.info(f"Successfully completed processing: {fname}")
-        return {"status": "completed", "file": fname, "error": None}
+        timing_result['status'] = 'completed'
+        timing_result['error'] = ''
+        timing_result['total_seconds'] = _elapsed_seconds(file_start)
+        logger.info(f"Successfully completed processing: {fname} in {timing_result['total_seconds']:.2f}s")
+        return timing_result
         
     except Exception as e:
         error_msg = f"Failed to process {fname}: {str(e)}"
+        timing_result['status'] = 'failed'
+        timing_result['error'] = str(e)
+        timing_result['total_seconds'] = _elapsed_seconds(file_start)
         logger.error(error_msg)
         logger.error(traceback.format_exc())
-        return {"status": "failed", "file": fname, "error": str(e)}
+        return timing_result
 
 def main():
+    main_start = time.perf_counter()
     # Get list of files to process
     files_to_process = [fname for fname in os.listdir(segmentation_folder) if fname.endswith(('.nii', '.nii.gz', '.npy', '.npz'))]
     
@@ -235,6 +346,9 @@ def main():
                 logger.error(traceback.format_exc())
                 results.append({"status": "failed", "file": fname, "error": str(e)})
     
+    wall_time_seconds = _elapsed_seconds(main_start)
+    _write_processing_times(results, output_base_folder)
+
     # Print results summary
     logger.info("\n" + "="*60)
     logger.info("PROCESSING SUMMARY:")
@@ -249,6 +363,8 @@ def main():
     if completed > 0:
         success_rate = (completed / len(results)) * 100
         logger.info(f"Success rate: {success_rate:.1f}%")
+
+    _log_timing_summary(results, wall_time_seconds)
     
     # Show failed files if any
     failed_results = [r for r in results if r["status"] == "failed"]
@@ -261,7 +377,7 @@ def main():
     logger.info(f"\nAll results saved in: {os.path.abspath(output_base_folder)}")
     logger.info(f"Log file: processing.log")
     
-    return completed, failed
+    return completed, failed, wall_time_seconds
 
 if __name__ == "__main__":
     main()
