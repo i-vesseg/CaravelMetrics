@@ -986,3 +986,42 @@ All results saved in: /home/pentassu/projects/CaravelMetrics/Results
 2026-06-02 11:08:58,869 - MainProcess - INFO - 
 All results saved in: /home/pentassu/projects/CaravelMetrics/Results
 2026-06-02 11:08:58,869 - MainProcess - INFO - Log file: processing.log
+2026-06-03 11:12:29,789 - MainProcess - INFO - Found 2 files to process
+2026-06-03 11:12:29,789 - MainProcess - INFO - Configuration: skip_existing=False, run_parallel=True
+2026-06-03 11:12:29,789 - MainProcess - INFO - Using 2 parallel workers (total CPUs: 256)
+2026-06-03 11:12:29,789 - MainProcess - INFO - Chunk size: 1
+2026-06-03 11:12:29,810 - ForkPoolWorker-1 - INFO - ============================================================
+2026-06-03 11:12:29,810 - ForkPoolWorker-2 - INFO - ============================================================
+2026-06-03 11:12:29,811 - ForkPoolWorker-1 - INFO - Processing file: CCmaxi_14907.nii (OUTPUT: Results/CCmaxi_14907)
+2026-06-03 11:12:29,811 - ForkPoolWorker-2 - INFO - Processing file: CCmaxi_4275.nii (OUTPUT: Results/CCmaxi_4275)
+2026-06-03 11:12:29,811 - ForkPoolWorker-1 - INFO - ============================================================
+2026-06-03 11:12:29,811 - ForkPoolWorker-2 - INFO - ============================================================
+2026-06-03 11:12:29,811 - ForkPoolWorker-1 - WARNING - Image file not found: CCmaxi_14907.nii
+2026-06-03 11:12:29,811 - ForkPoolWorker-2 - WARNING - Image file not found: CCmaxi_4275.nii
+2026-06-03 11:12:29,811 - ForkPoolWorker-1 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_14907.nii
+2026-06-03 11:12:29,811 - ForkPoolWorker-2 - INFO -   Starting VESSEL GRAPH EXTRACTION for: CCmaxi_4275.nii
+2026-06-03 11:15:18,901 - ForkPoolWorker-1 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_14907
+2026-06-03 11:15:18,901 - ForkPoolWorker-1 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_14907.nii
+2026-06-03 11:15:19,557 - ForkPoolWorker-1 - INFO -   Metrics computed and saved in: Results/CCmaxi_14907
+2026-06-03 11:15:19,557 - ForkPoolWorker-1 - INFO - Successfully completed processing: CCmaxi_14907.nii in 169.75s
+2026-06-03 11:15:40,113 - ForkPoolWorker-2 - INFO -   Vessel graph extracted and saved in: Results/CCmaxi_4275
+2026-06-03 11:15:40,114 - ForkPoolWorker-2 - INFO -   Starting METRICS COMPUTATION for: CCmaxi_4275.nii
+2026-06-03 11:15:40,779 - ForkPoolWorker-2 - INFO -   Metrics computed and saved in: Results/CCmaxi_4275
+2026-06-03 11:15:40,779 - ForkPoolWorker-2 - INFO - Successfully completed processing: CCmaxi_4275.nii in 190.97s
+2026-06-03 11:15:40,808 - MainProcess - INFO - Timing CSV saved to: Results/processing_times.csv
+2026-06-03 11:15:40,809 - MainProcess - INFO - 
+============================================================
+2026-06-03 11:15:40,809 - MainProcess - INFO - PROCESSING SUMMARY:
+2026-06-03 11:15:40,809 - MainProcess - INFO - ============================================================
+2026-06-03 11:15:40,809 - MainProcess - INFO - Successfully completed: 2/2
+2026-06-03 11:15:40,809 - MainProcess - INFO - Failed: 0/2
+2026-06-03 11:15:40,809 - MainProcess - INFO - Success rate: 100.0%
+2026-06-03 11:15:40,809 - MainProcess - INFO - 
+TIMING SUMMARY:
+2026-06-03 11:15:40,809 - MainProcess - INFO - Whole execution wall time: 191.02s
+2026-06-03 11:15:40,809 - MainProcess - INFO - Average per completed input file: 180.36s
+2026-06-03 11:15:40,809 - MainProcess - INFO - Average graph extraction time: 179.70s
+2026-06-03 11:15:40,809 - MainProcess - INFO - Average metrics computation time: 0.66s
+2026-06-03 11:15:40,809 - MainProcess - INFO - 
+All results saved in: /home/pentassu/projects/CaravelMetrics/Results
+2026-06-03 11:15:40,809 - MainProcess - INFO - Log file: processing.log

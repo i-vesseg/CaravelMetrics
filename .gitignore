@@ -5,6 +5,7 @@ Results*/
 old_version*/
 ATLAS*
 
+*.log
 
 # Python
 __pycache__/
@@ -34,4 +35,3 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-
