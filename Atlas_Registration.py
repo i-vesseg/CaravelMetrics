@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ATLAS_DIR = os.path.join(SCRIPT_DIR, "Atlas")
 
-# Set the default filenames expected inside the Atlas folder
-DEFAULT_MNI_T1 = os.path.join(DEFAULT_ATLAS_DIR, "MNI152_T1_1mm_brain.nii.gz")
+# Now we define explicit paths for both the Brain-only and Whole-head templates
+DEFAULT_MNI_T1_BRAIN = os.path.join(DEFAULT_ATLAS_DIR, "MNI152_T1_1mm_Brain.nii.gz")
+DEFAULT_MNI_T1_WHOLE = os.path.join(DEFAULT_ATLAS_DIR, "MNI152_T1_1mm.nii.gz")
 DEFAULT_PARCELLATION = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlas.nii.gz") 
 
 def run_cmd(cmd_list):
@@ -45,7 +46,7 @@ def preprocess_mra(mra_path: str, output_dir: str, do_denoise: bool, do_debias: 
     if do_denoise:
         logger.info("  [PREPROC] Denoising MRA using ANTs DenoiseImage...")
         denoised_mra = os.path.join(output_dir, f"{base_name}_denoised.nii.gz")
-        run_cmd(["DenoiseImage", "-d", "3", "-i", current_mra, "-o", denoised_mra])
+        run_cmd(["DenoiseImage", "-d", "3", "-i", current_mra, "-o", denoised_mra, "-n", "Rician"])
         current_mra = denoised_mra
 
     # 2. DEBIAS (ANTs N4BiasFieldCorrection)
@@ -59,16 +60,17 @@ def preprocess_mra(mra_path: str, output_dir: str, do_denoise: bool, do_debias: 
 
 def atlas_registration(
     mni_parcellation: str,
-    mni_t1_template: str,
+    mni_t1_brain: str,    
+    mni_t1_whole: str,    
     image_path: str,      # MRA
     output_dir: str = ".",
-    image_t1: str = None, # Optional T1
+    image_t1: str = None, 
     denoise_mra: bool = False,
     debias_mra: bool = False
 ) -> tuple:
     
-    # Base naming setup
-    base_name = os.path.basename(image_path).split('.')[0]
+    # 1. Explicitly separate MRA and T1 prefixes
+    mra_prefix = os.path.basename(image_path).split('.')[0]
     
     # --- MRA PREPROCESSING ---
     if denoise_mra or debias_mra:
@@ -78,28 +80,27 @@ def atlas_registration(
     # ROUTE A: T1 IS AVAILABLE
     # ---------------------------------------------------------
     if image_t1 and os.path.exists(image_t1):
-        t1_name = os.path.basename(image_t1).split('.')[0]
-        base_name = t1_name # Override base name for consistency
+        t1_prefix = os.path.basename(image_t1).split('.')[0]
         
-        # 0. ROBUST FOV (NECK CROP)
+        # 0. ROBUST FOV
         logger.info(f"  [DEBUG 0/6] ROBUSTFOV: Removing neck tissue...")
-        t1_fov = os.path.join(output_dir, f"{t1_name}_cropped_fov.nii.gz")
+        t1_fov = os.path.join(output_dir, f"{t1_prefix}_cropped_fov.nii.gz")
         run_cmd(["robustfov", "-i", image_t1, "-r", t1_fov, "-b", "180"])
 
         # 1. BRAIN EXTRACTION
         logger.info(f"  [DEBUG 1/6] BET: Extracting brain...")
-        t1_brain = os.path.join(output_dir, f"{t1_name}_BETted_brain.nii.gz")
+        t1_brain = os.path.join(output_dir, f"{t1_prefix}_brain.nii.gz")
         run_cmd(["bet", t1_fov, t1_brain, "-m", "-f", "0.4", "-R"])
 
         # 2. REORIENT TO STANDARD
         logger.info(f"  [DEBUG 2/6] REORIENT: Aligning T1 orientation to standard...")
-        t1_reoriented = os.path.join(output_dir, f"{t1_name}_Reoriented.nii.gz")
+        t1_reoriented = os.path.join(output_dir, f"{t1_prefix}_reoriented.nii.gz")
         run_cmd(["fslreorient2std", t1_brain, t1_reoriented])
 
-        # 3. T1 -> MRA (6-DOF)
+        # 3. T1 -> MRA
         logger.info(f"  [DEBUG 3/6] FLIRT: Registering Subject T1 to Subject MRA...")
-        t1_in_mra_img = os.path.join(output_dir, f"{t1_name}_T1_in_MRA.nii.gz")
-        t1_to_mra_mat = os.path.join(output_dir, "t1_to_mra.mat")
+        t1_in_mra_img = os.path.join(output_dir, f"{t1_prefix}_in_MRA.nii.gz")
+        t1_to_mra_mat = os.path.join(output_dir, f"{t1_prefix}_to_MRA.mat")
         run_cmd([
             "flirt", "-in", t1_reoriented, "-ref", image_path, 
             "-out", t1_in_mra_img, "-omat", t1_to_mra_mat, 
@@ -109,19 +110,19 @@ def atlas_registration(
             "-searchrz", "-180", "180"
         ])
 
-        # 4. MNI -> T1 (12-DOF)
-        logger.info(f"  [DEBUG 4/6] FLIRT: Registering MNI Template to Subject T1...")
-        mni_in_t1_img = os.path.join(output_dir, f"{t1_name}_MNI_in_T1.nii.gz")
-        mni_to_t1_mat = os.path.join(output_dir, "mni_to_t1.mat")
+        # 4. MNI -> T1
+        logger.info(f"  [DEBUG 4/6] FLIRT: Registering MNI Brain Template to Subject T1...")
+        mni_in_t1_img = os.path.join(output_dir, f"MNI_in_{t1_prefix}.nii.gz")
+        mni_to_t1_mat = os.path.join(output_dir, f"MNI_to_{t1_prefix}.mat")
         run_cmd([
-            "flirt", "-in", mni_t1_template, "-ref", t1_reoriented, 
+            "flirt", "-in", mni_t1_brain, "-ref", t1_reoriented, 
             "-out", mni_in_t1_img, "-omat", mni_to_t1_mat, 
             "-dof", "12", "-cost", "corratio"
         ])
 
         # 5. CONCATENATE MATRICES
         logger.info(f"  [DEBUG 5/6] CONVERT_XFM: Combining transforms (MNI -> T1 -> MRA)...")
-        combined_mat = os.path.join(output_dir, "combined_mni_to_mra.mat")
+        combined_mat = os.path.join(output_dir, f"{mra_prefix}_MNI_to_MRA_combined.mat")
         run_cmd([
             "convert_xfm", "-omat", combined_mat, 
             "-concat", t1_to_mra_mat, mni_to_t1_mat
@@ -133,14 +134,14 @@ def atlas_registration(
     else:
         logger.info("  [DEBUG] No T1 provided. Routing direct MNI to MRA registration...")
         
-        # 1. MNI -> MRA (12-DOF)
-        logger.info(f"  [DEBUG 1/2] FLIRT: Registering MNI Template to Subject MRA...")
-        mni_in_mra_img = os.path.join(output_dir, f"{base_name}_MNI_in_MRA.nii.gz")
-        combined_mat = os.path.join(output_dir, "combined_mni_to_mra.mat")
+        # 1. MNI -> MRA
+        logger.info(f"  [DEBUG 1/2] FLIRT: Registering MNI Whole Head Template to Subject MRA...")
+        mni_in_mra_img = os.path.join(output_dir, f"MNI_in_{mra_prefix}.nii.gz")
+        combined_mat = os.path.join(output_dir, f"{mra_prefix}_MNI_to_MRA_combined.mat")
         run_cmd([
-            "flirt", "-in", mni_t1_template, "-ref", image_path, 
+            "flirt", "-in", mni_t1_whole, "-ref", image_path, 
             "-out", mni_in_mra_img, "-omat", combined_mat, 
-            "-dof", "12", "-cost", "mutualinfo",
+            "-dof", "12", "-cost", "normmi", "-bins", "32",
             "-searchrx", "-180", "180", 
             "-searchry", "-180", "180", 
             "-searchrz", "-180", "180"
@@ -149,14 +150,14 @@ def atlas_registration(
     # ---------------------------------------------------------
     # COMMON FINAL STEPS
     # ---------------------------------------------------------
-    # 5.5 CREATE INVERSE MATRIX (MRA -> MNI)
+    # 5.5 CREATE INVERSE MATRIX
     logger.info(f"  [DEBUG 5.5/6] CONVERT_XFM: Inverting combined matrix (MRA -> MNI)...")
-    mra_to_mni_mat = os.path.join(output_dir, "mra_to_mni.mat")
+    mra_to_mni_mat = os.path.join(output_dir, f"{mra_prefix}_MRA_to_MNI_inverse.mat")
     run_cmd(["convert_xfm", "-omat", mra_to_mni_mat, "-inverse", combined_mat])
 
     # 6. FINAL WARP: MNI PARCELLATION -> MRA
     logger.info(f"  [DEBUG 6/6] APPLYXFM: Warping MNI Parcellation to MRA space...")
-    reg_parcellation_path = os.path.join(output_dir, f"{base_name}_registered_parcellation.nii.gz")
+    reg_parcellation_path = os.path.join(output_dir, f"{mra_prefix}_registered_parcellation.nii.gz")
     run_cmd([
         "flirt", "-in", mni_parcellation, "-ref", image_path, 
         "-out", reg_parcellation_path, "-applyxfm", "-init", combined_mat, 
@@ -165,7 +166,7 @@ def atlas_registration(
 
     # 7. EXPAND propagated parcellation
     logger.info(f"  [DEBUG 7/7] IMAGEMATHS: Dilating parcellation labels into the background...")
-    dilated_parcellation_path = os.path.join(output_dir, f"{base_name}_registered_parcellation_dilated.nii.gz")
+    dilated_parcellation_path = os.path.join(output_dir, f"{mra_prefix}_registered_parcellation_dilated.nii.gz")
     run_cmd([
         "fslmaths", reg_parcellation_path, 
         "-dilD", "-dilD", "-dilD", "-dilD", "-dilD", 
@@ -185,29 +186,39 @@ def process_registration(
 ):
     
     # --- FALLBACK LOGIC ---
-    if mni_t1_template is None:
-        mni_t1_template = DEFAULT_MNI_T1
     if mni_parcellation is None:
         mni_parcellation = DEFAULT_PARCELLATION
 
+    # If the user provides a single custom template via CLI, we override both logic paths with it.
+    # Otherwise, we use our smart dual-template system.
+    if mni_t1_template is not None:
+        mni_t1_brain = mni_t1_template
+        mni_t1_whole = mni_t1_template
+    else:
+        mni_t1_brain = DEFAULT_MNI_T1_BRAIN
+        mni_t1_whole = DEFAULT_MNI_T1_WHOLE
+
     # --- VERIFICATION ---
-    if not os.path.exists(mni_t1_template):
-        raise FileNotFoundError(
-            f"MNI T1 Template not found at: {mni_t1_template}\n"
-            "Please provide it via CLI or place the file in the 'Atlas/' folder."
-        )
-        
-    if not os.path.exists(mni_parcellation):
-        raise FileNotFoundError(
-            f"MNI Parcellation not found at: {mni_parcellation}\n"
-            "Please provide it via CLI or place the file in the 'Atlas/' folder."
-        )
+    # Validate the files we are actively going to use based on the route
+    required_files = [(mni_parcellation, "MNI Parcellation")]
+    if image_t1_path and os.path.exists(image_t1_path):
+        required_files.append((mni_t1_brain, "MNI T1 Brain Template"))
+    else:
+        required_files.append((mni_t1_whole, "MNI T1 Whole Template"))
+
+    for path, name in required_files:
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"{name} not found at: {path}\n"
+                "Please provide it via CLI or ensure the file exists in the 'Atlas/' folder."
+            )
 
     os.makedirs(output_dir, exist_ok=True)
 
     return atlas_registration(
         mni_parcellation=mni_parcellation,
-        mni_t1_template=mni_t1_template,
+        mni_t1_brain=mni_t1_brain,
+        mni_t1_whole=mni_t1_whole,
         image_path=image_path,
         output_dir=output_dir,
         image_t1=image_t1_path,
@@ -221,12 +232,10 @@ if __name__ == "__main__":
     # Required Image
     parser.add_argument("--image", required=True, help="Path to the reference MRA image.")
     
-    # Defaults for MNI files
-    parser.add_argument("--parcellation", default=None, help="Path to the MNI parcellation file (defaults to Atlas/ArterialAtlas.nii.gz).")
-    parser.add_argument("--template", default=None, help="Path to the MNI T1 template (defaults to Atlas/MNI152_T1_1mm_brain.nii.gz).")
-    
     # Optional Arguments
     parser.add_argument("--t1", default=None, help="Path to the subject T1 image (if omitted, direct MNI->MRA is used).")
+    parser.add_argument("--parcellation", default=None, help="Path to custom MNI parcellation (defaults to Atlas/ArterialAtlas.nii.gz).")
+    parser.add_argument("--template", default=None, help="Override path for the MNI template (disables smart Whole/Brain selection).")
     parser.add_argument("--output_dir", default=".", help="Directory to save outputs.")
     
     # ANTs Preprocessing flags
