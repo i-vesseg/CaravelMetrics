@@ -1,10 +1,7 @@
 # Output folders
-outputs*/
-results*/
 Results*/
-old_version*/
-ATLAS*
 
+tests*/
 
 # Python
 __pycache__/

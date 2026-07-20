@@ -116,7 +116,12 @@ def process_single_file(fname, image_folder, t1_image_folder, segmentation_folde
                 logger.info(f"  Skipped ATLAS REGISTRATION: {fname} (output already exists)")
             else:
                 logger.info(f"  Starting ATLAS REGISTRATION for: {fname}")
-                process_registration(image_path, t1_image_path, mask_path, atlas_path, output_folder)
+                process_registration(
+                    image_path=image_path, 
+                    output_dir=output_folder, 
+                    mni_parcellation=atlas_path, 
+                    image_t1_path=t1_image_path
+                )
                 logger.info(f"  REGISTERED ATLAS saved at: {registered_atlas_path}")
     
     
