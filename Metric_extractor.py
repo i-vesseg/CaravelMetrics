@@ -39,6 +39,16 @@ def load_label_map(txt_path):
 
 def compute_tortuosity_metrics(points, smoothing=0, n_samples=500, counts=None):
     pts = np.asarray(points)
+    
+    # --- FIX: Filter out consecutive duplicate points that crash splprep ---
+    if pts.shape[0] > 1:
+        diffs = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+        valid_idx = np.insert(diffs > 1e-6, 0, True) # Keep the first point, drop duplicates
+        pts = pts[valid_idx]
+        if counts is not None:
+            counts = np.asarray(counts)[valid_idx]
+    # ---------------------------------------------------------------------
+
     if pts.shape[0] < 4:
         nan_dict = {k: np.nan for k in [
             'spline_arc_length','spline_chord_length',
@@ -376,6 +386,82 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
     return results
 
 
+def robust_graph_loader(pkl_path):
+    """
+    Intelligently loads a graph from a pickle file, hunting for networkx objects.
+    Includes support for Caravel dictionaries, raw NetworkX graphs, and UNC Skwerer Tree dictionaries.
+    """
+    import sys
+    import networkx as nx
+    import numpy as np
+    
+    # Legacy numpy compatibility (kept from original code)
+    if 'numpy._core' not in sys.modules:
+        try:
+            import numpy.core as _core
+            sys.modules['numpy._core'] = _core
+        except: pass
+
+    with open(pkl_path, 'rb') as f:
+        try: 
+            data = pickle.load(f, encoding='latin1')
+        except:
+            f.seek(0)
+            data = pickle.load(f)
+            
+    G = None
+    node_radius_map = None
+
+    # Scenario 1: The user saved a raw networkx graph directly
+    if isinstance(data, (nx.Graph, nx.DiGraph)):
+        G = data
+        
+    # Scenario 2: The user saved a dictionary (like the Caravel pipeline)
+    elif isinstance(data, dict) and 'graph' in data and isinstance(data['graph'], (nx.Graph, nx.DiGraph)):
+        G = data['graph']
+        if 'node_radius_map' in data:
+            node_radius_map = data['node_radius_map']
+
+    # Scenario 3: UNC Skwerer/Bullitt Tree Dictionary
+    elif isinstance(data, dict) and 'nodes' in data and isinstance(data['nodes'], list):
+        G = nx.Graph()
+        node_radius_map = {}
+        
+        # Rebuild the graph from the node list
+        for node in data['nodes']:
+            n_id = node['id']
+            pos = np.array(node['xyz'])
+            radius = node['radius']
+            
+            G.add_node(n_id, pos=pos, radius=radius)
+            node_radius_map[n_id] = radius
+            
+            parent = node.get('parent', -1)
+            if parent >= 0:
+                G.add_edge(n_id, parent)
+                
+        # Calculate edge weights (Euclidean distance) required for metric extraction
+        for u, v in G.edges():
+            G[u][v]['weight'] = np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
+
+    # Scenario 4: Hunt for any value that is a networkx graph
+    elif isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (nx.Graph, nx.DiGraph)):
+                G = value
+                break
+
+    if G is None:
+        raise ValueError(f"Could not find a valid networkx Graph in {pkl_path}")
+
+    # Fallback: Build radius map from node attributes if not provided separately
+    if node_radius_map is None:
+        node_radius_map = {}
+        for n in G.nodes():
+            node_radius_map[n] = G.nodes[n].get('radius', 0.5) 
+
+    return G, node_radius_map
+
 def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_path=None, mask_path=None, registered_atlas_path=None):
     use_atlas = True if registered_atlas_path else False
     results = {'region_metrics': {}} if use_atlas else {}
@@ -386,19 +472,7 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
     if use_atlas: aligned_atlas = sitk.ReadImage(registered_atlas_path)
     
     try:
-        import sys
-        if 'numpy._core' not in sys.modules:
-            try:
-                import numpy.core as _core
-                sys.modules['numpy._core'] = _core
-            except: pass
-        with open(graph_pkl_path, 'rb') as f:
-            try: data = pickle.load(f, encoding='latin1')
-            except:
-                f.seek(0)
-                data = pickle.load(f)
-        G = data['graph']
-        node_radius_map = data['node_radius_map']
+        G, node_radius_map = robust_graph_loader(graph_pkl_path)
     except Exception as e:
         print(f"  ERROR: Failed to load pickle - {e}")
         return
@@ -424,24 +498,31 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
     label_map = load_label_map(label_map_path)
     
     if use_atlas:
-        # Snap atlas data to nearest integers to fix float inaccuracies
-        aligned_atlas_data = np.round(sitk.GetArrayFromImage(aligned_atlas)).astype(int).T
+        # Load Atlas with Nibabel instead of SimpleITK to avoid LPS/RAS coordinate flipping!
+        aligned_atlas_img = nib.load(registered_atlas_path)
+        aligned_atlas_data = np.round(aligned_atlas_img.get_fdata()).astype(int)
+        inv_affine = np.linalg.inv(aligned_atlas_img.affine)
+        
         region_nodes = {}
-        size = aligned_atlas.GetSize()
+        size = aligned_atlas_data.shape
+        
         for n in G.nodes():
             pos = G.nodes[n]['pos']
             try:
-                idx = aligned_atlas.TransformPhysicalPointToIndex(pos)
+                # Convert RAS physical position to Voxel Index directly
+                idx_float = nib.affines.apply_affine(inv_affine, pos)
+                idx = np.round(idx_float).astype(int)
+                
+                # Check bounds
                 if (0 <= idx[0] < size[0] and 0 <= idx[1] < size[1] and 0 <= idx[2] < size[2]):
-                    raw_val = aligned_atlas[idx]
-                    region_id = int(round(float(raw_val))) # Force standard integer
+                    region_id = aligned_atlas_data[idx[0], idx[1], idx[2]]
                     
                     # FILTER: Keep only the 30 arterial territories, ignore ventricles (31, 32)
                     if 0 < region_id <= 30:
                         if region_id not in region_nodes: region_nodes[region_id] = []
                         region_nodes[region_id].append(n)
-            except:
-                raise ValueError(f"Failed to transform point {pos} to index in atlas.")
+            except Exception as e:
+                raise ValueError(f"Failed to transform point {pos} to index in atlas. Error: {e}")
             
         for r_id in sorted(region_nodes.keys()):
             r_id_int = int(r_id) # Absolute safety cast for dictionary matching
@@ -497,8 +578,20 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             
         # --- NEW: SAVE GLOBAL TOTALS ---
         global_length = G.size(weight='weight')
+        
+        # Estimate global volume using the cylinder approximation
+        estimated_global_volume = 0.0
+        for u, v, d in G.edges(data=True):
+            l = d.get('weight', 0)
+            r = (node_radius_map.get(u, 0.5) + node_radius_map.get(v, 0.5)) / 2.0
+            estimated_global_volume += l * np.pi * (r ** 2)
+            
+        # Use exact mask volume if available, otherwise fallback to the cylinder estimate
+        final_volume = total_true_volume 
+
         global_df = pd.DataFrame([{
-            'total_global_volume_mm3': total_true_volume,
+            'total_global_volume_mm3': final_volume,
+            'estimated_cylinder_volume_mm3': estimated_global_volume,
             'total_global_length_mm': global_length
         }])
         global_df.to_csv(os.path.join(output_folder, 'global_summary.csv'), index=False)

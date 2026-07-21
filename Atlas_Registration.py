@@ -173,6 +173,13 @@ def atlas_registration(
         dilated_parcellation_path
     ])
 
+    # 8. CLEANUP: Remove intermediate files if needed
+    os.remove(t1_fov) if image_t1 and os.path.exists(image_t1) else None
+    os.remove(t1_brain) if image_t1 and os.path.exists(image_t1) else None
+    os.remove(t1_reoriented) if image_t1 and os.path.exists(image_t1) else None
+    os.remove(mni_in_t1_img) if image_t1 and os.path.exists(image_t1) else None
+    
+
     return dilated_parcellation_path, mra_to_mni_mat
 
 def process_registration(
