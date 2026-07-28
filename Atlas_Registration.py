@@ -10,11 +10,9 @@ logger = logging.getLogger(__name__)
 # =========================================================================
 #                             DEFAULT PATHS
 # =========================================================================
-# Dynamically locate the 'Atlas' directory relative to this script's location
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ATLAS_DIR = os.path.join(SCRIPT_DIR, "Atlas")
 
-# Now we define explicit paths for both the Brain-only and Whole-head templates
 DEFAULT_MNI_T1_BRAIN = os.path.join(DEFAULT_ATLAS_DIR, "MNI152_T1_1mm_Brain.nii.gz")
 DEFAULT_MNI_T1_WHOLE = os.path.join(DEFAULT_ATLAS_DIR, "MNI152_T1_1mm.nii.gz")
 DEFAULT_PARCELLATION = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlas.nii.gz") 
@@ -25,11 +23,7 @@ def run_cmd(cmd_list):
     logger.debug(f"Running: {cmd_str}")
     try:
         result = subprocess.run(
-            cmd_list, 
-            check=True, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            text=True
+            cmd_list, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
@@ -37,44 +31,132 @@ def run_cmd(cmd_list):
         logger.error(f"Stderr: {e.stderr}")
         raise RuntimeError(f"Command failed: {cmd_str}\n{e.stderr}")
 
-def preprocess_mra(mra_path: str, output_dir: str, do_denoise: bool, do_debias: bool) -> str:
-    """Applies Denoising and/or N4 Debiasing to the MRA image using ANTs."""
-    base_name = os.path.basename(mra_path).split('.')[0]
-    current_mra = mra_path
+def apply_ants_preprocessing(image_path: str, output_dir: str, do_denoise: bool, do_debias: bool, cleanup_list: list) -> str:
+    """Unified ANTs preprocessing. Returns the path to the processed image."""
+    base_name = os.path.basename(image_path).split('.')[0]
+    current_img = image_path
 
-    # 1. DENOISE (ANTs DenoiseImage - Non-Local Means)
     if do_denoise:
-        logger.info("  [PREPROC] Denoising MRA using ANTs DenoiseImage...")
-        denoised_mra = os.path.join(output_dir, f"{base_name}_denoised.nii.gz")
-        run_cmd(["DenoiseImage", "-d", "3", "-i", current_mra, "-o", denoised_mra, "-n", "Rician"])
-        current_mra = denoised_mra
+        logger.info(f"  [PREPROC] Denoising {base_name} using ANTs DenoiseImage...")
+        denoised_img = os.path.join(output_dir, f"{base_name}_denoised.nii.gz")
+        run_cmd(["DenoiseImage", "-d", "3", "-i", current_img, "-o", denoised_img, "-n", "Rician"])
+        current_img = denoised_img
 
-    # 2. DEBIAS (ANTs N4BiasFieldCorrection)
     if do_debias:
-        logger.info("  [PREPROC] Debiasing MRA using ANTs N4BiasFieldCorrection...")
-        debiased_mra = os.path.join(output_dir, f"{base_name}_debiased.nii.gz")
-        run_cmd(["N4BiasFieldCorrection", "-d", "3", "-i", current_mra, "-o", debiased_mra])
-        current_mra = debiased_mra
+        logger.info(f"  [PREPROC] Debiasing {base_name} using ANTs N4BiasFieldCorrection...")
+        debiased_img = os.path.join(output_dir, f"{base_name}_debiased.nii.gz")
+        run_cmd(["N4BiasFieldCorrection", "-d", "3", "-i", current_img, "-o", debiased_img])
+        
+        if do_denoise:
+            cleanup_list.append(current_img)
+            
+        current_img = debiased_img
 
-    return current_mra
+    return current_img
+
+def generate_qc_snapshot(mra_path: str, seg_path: str, output_path: str):
+    """Generates a highly condensed 3-view QC snapshot without bloating dependencies."""
+    try:
+        import numpy as np
+        import nibabel as nib
+        import matplotlib.pyplot as plt
+        from scipy.ndimage import maximum_filter, minimum_filter
+    except ImportError:
+        logger.error("  [QC] Snapshot failed: Missing libraries. Run: pip install nibabel matplotlib scipy")
+        return
+
+    logger.info(f"  [QC] Generating quality control snapshot: {os.path.basename(output_path)}...")
+    
+    # Load data and spacing
+    mra_img = nib.load(mra_path)
+    mra_data = mra_img.get_fdata()
+    seg_data = nib.load(seg_path).get_fdata()
+    dx, dy, dz = mra_img.header.get_zooms()[:3]
+
+    # Fast Boundaries
+    footprint = np.ones((3, 3, 3))
+    boundaries = (maximum_filter(seg_data, footprint=footprint) != minimum_filter(seg_data, footprint=footprint)) & (seg_data > 0)
+    contour_labels = np.where(boundaries, seg_data, 0)
+
+    # Crop to brain bounding box for tight views
+    coords = np.argwhere(mra_data > np.percentile(mra_data, 10))
+    if coords.size > 0:
+        min_c = np.maximum(coords.min(axis=0) - 5, 0)
+        max_c = np.minimum(coords.max(axis=0) + 5, mra_data.shape)
+        mra_crop = mra_data[min_c[0]:max_c[0], min_c[1]:max_c[1], min_c[2]:max_c[2]]
+        seg_crop = contour_labels[min_c[0]:max_c[0], min_c[1]:max_c[1], min_c[2]:max_c[2]]
+    else:
+        mra_crop, seg_crop = mra_data, contour_labels
+
+    # Contrast scaling
+    mra_crop = np.clip(mra_crop, *np.percentile(mra_crop, [1, 99.5]))
+
+    # Grid setup
+    mid = np.array(mra_crop.shape) // 2
+    step, num_slices = 40, 5
+    
+    plt.style.use('dark_background')
+    fig, axes = plt.subplots(3, num_slices, figsize=(4 * num_slices, 11), dpi=200)
+    fig.suptitle(f"QC Panel: {os.path.basename(mra_path)}", fontsize=14, fontweight='bold', y=0.98)
+
+    views = [
+        ('Sagittal', 0, dz / dy),
+        ('Coronal', 1, dz / dx),
+        ('Axial', 2, dy / dx)
+    ]
+
+    cmap = plt.get_cmap('turbo')
+    
+    for row_idx, (v_name, axis, aspect) in enumerate(views):
+        slices = np.linspace(mid[axis] - step, mid[axis] + step, num_slices, dtype=int)
+        for col_idx, s in enumerate(slices):
+            ax = axes[row_idx, col_idx]
+            s_valid = np.clip(s, 0, mra_crop.shape[axis] - 1)
+            
+            # Use np.take to dynamically extract slices across arbitrary axes
+            mra_s = np.rot90(mra_crop.take(s_valid, axis=axis))
+            seg_s = np.rot90(seg_crop.take(s_valid, axis=axis))
+            
+            ax.imshow(mra_s, cmap='gray', origin='upper', aspect=aspect)
+            ax.imshow(np.ma.masked_where(seg_s == 0, seg_s), cmap=cmap, alpha=1, interpolation='nearest', origin='upper', aspect=aspect)
+            
+            if col_idx == 0:
+                ax.set_ylabel(v_name, fontsize=11, fontweight='bold', labelpad=10)
+            ax.axis('off')
+
+    plt.tight_layout()
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05, dpi=200, facecolor=fig.get_facecolor())
+    plt.close()
+    plt.style.use('default')
 
 def atlas_registration(
     mni_parcellation: str,
     mni_t1_brain: str,    
     mni_t1_whole: str,    
-    image_path: str,      # MRA
+    image_path: str,      
     output_dir: str = ".",
     image_t1: str = None, 
-    denoise_mra: bool = False,
-    debias_mra: bool = False
+    preprocess_mra: bool = False,
+    preprocess_t1: bool = False,
+    mra_stripped: bool = False,
+    t1_stripped: bool = False,
+    generate_qc: bool = False
 ) -> tuple:
     
-    # 1. Explicitly separate MRA and T1 prefixes
     mra_prefix = os.path.basename(image_path).split('.')[0]
+    files_to_cleanup = [] 
     
-    # --- MRA PREPROCESSING ---
-    if denoise_mra or debias_mra:
-        image_path = preprocess_mra(image_path, output_dir, denoise_mra, debias_mra)
+    # --- MRA PREPROCESSING (Noise + Bias) ---
+    if preprocess_mra:
+        image_path = apply_ants_preprocessing(
+            image_path, output_dir, do_denoise=True, do_debias=True, cleanup_list=files_to_cleanup
+        )
+
+    # --- T1 PREPROCESSING (Bias only) ---
+    if image_t1 and os.path.exists(image_t1) and preprocess_t1:
+        image_t1 = apply_ants_preprocessing(
+            image_t1, output_dir, do_denoise=False, do_debias=True, cleanup_list=files_to_cleanup
+        )
 
     # ---------------------------------------------------------
     # ROUTE A: T1 IS AVAILABLE
@@ -82,36 +164,38 @@ def atlas_registration(
     if image_t1 and os.path.exists(image_t1):
         t1_prefix = os.path.basename(image_t1).split('.')[0]
         
-        # 0. ROBUST FOV
-        logger.info(f"  [DEBUG 0/6] ROBUSTFOV: Removing neck tissue...")
-        t1_fov = os.path.join(output_dir, f"{t1_prefix}_cropped_fov.nii.gz")
-        run_cmd(["robustfov", "-i", image_t1, "-r", t1_fov, "-b", "180"])
+        if not t1_stripped:
+            logger.info("  [DEBUG] ROBUSTFOV: Removing neck tissue...")
+            t1_fov = os.path.join(output_dir, f"{t1_prefix}_cropped_fov.nii.gz")
+            run_cmd(["robustfov", "-i", image_t1, "-r", t1_fov, "-b", "180"])
+            files_to_cleanup.append(t1_fov)
 
-        # 1. BRAIN EXTRACTION
-        logger.info(f"  [DEBUG 1/6] BET: Extracting brain...")
-        t1_brain = os.path.join(output_dir, f"{t1_prefix}_brain.nii.gz")
-        run_cmd(["bet", t1_fov, t1_brain, "-m", "-f", "0.4", "-R"])
+            logger.info("  [DEBUG] BET: Extracting brain...")
+            t1_brain = os.path.join(output_dir, f"{t1_prefix}_brain.nii.gz")
+            run_cmd(["bet", t1_fov, t1_brain, "-m", "-f", "0.4", "-R"])
+            files_to_cleanup.append(t1_brain)
+            
+            t1_to_reorient = t1_brain
+        else:
+            logger.info("  [DEBUG] T1 is already skull-stripped. Skipping FOV crop and BET.")
+            t1_to_reorient = image_t1
 
-        # 2. REORIENT TO STANDARD
-        logger.info(f"  [DEBUG 2/6] REORIENT: Aligning T1 orientation to standard...")
+        logger.info("  [DEBUG] REORIENT: Aligning T1 orientation to standard...")
         t1_reoriented = os.path.join(output_dir, f"{t1_prefix}_reoriented.nii.gz")
-        run_cmd(["fslreorient2std", t1_brain, t1_reoriented])
+        run_cmd(["fslreorient2std", t1_to_reorient, t1_reoriented])
+        files_to_cleanup.append(t1_reoriented)
 
-        # 3. T1 -> MRA
-        logger.info(f"  [DEBUG 3/6] FLIRT: Registering Subject T1 to Subject MRA...")
+        logger.info("  [DEBUG] FLIRT: Registering Subject T1 to Subject MRA...")
         t1_in_mra_img = os.path.join(output_dir, f"{t1_prefix}_in_MRA.nii.gz")
         t1_to_mra_mat = os.path.join(output_dir, f"{t1_prefix}_to_MRA.mat")
         run_cmd([
             "flirt", "-in", t1_reoriented, "-ref", image_path, 
             "-out", t1_in_mra_img, "-omat", t1_to_mra_mat, 
             "-dof", "6", "-cost", "mutualinfo",
-            "-searchrx", "-180", "180", 
-            "-searchry", "-180", "180", 
-            "-searchrz", "-180", "180"
+            "-searchrx", "-180", "180", "-searchry", "-180", "180", "-searchrz", "-180", "180"
         ])
 
-        # 4. MNI -> T1
-        logger.info(f"  [DEBUG 4/6] FLIRT: Registering MNI Brain Template to Subject T1...")
+        logger.info("  [DEBUG] FLIRT: Registering MNI Brain Template to Subject T1...")
         mni_in_t1_img = os.path.join(output_dir, f"MNI_in_{t1_prefix}.nii.gz")
         mni_to_t1_mat = os.path.join(output_dir, f"MNI_to_{t1_prefix}.mat")
         run_cmd([
@@ -119,9 +203,9 @@ def atlas_registration(
             "-out", mni_in_t1_img, "-omat", mni_to_t1_mat, 
             "-dof", "12", "-cost", "corratio"
         ])
+        files_to_cleanup.append(mni_in_t1_img)
 
-        # 5. CONCATENATE MATRICES
-        logger.info(f"  [DEBUG 5/6] CONVERT_XFM: Combining transforms (MNI -> T1 -> MRA)...")
+        logger.info("  [DEBUG] CONVERT_XFM: Combining transforms (MNI -> T1 -> MRA)...")
         combined_mat = os.path.join(output_dir, f"{mra_prefix}_MNI_to_MRA_combined.mat")
         run_cmd([
             "convert_xfm", "-omat", combined_mat, 
@@ -134,29 +218,27 @@ def atlas_registration(
     else:
         logger.info("  [DEBUG] No T1 provided. Routing direct MNI to MRA registration...")
         
-        # 1. MNI -> MRA
-        logger.info(f"  [DEBUG 1/2] FLIRT: Registering MNI Whole Head Template to Subject MRA...")
+        mni_template = mni_t1_brain if mra_stripped else mni_t1_whole
+        template_type = "Brain" if mra_stripped else "Whole Head"
+        
+        logger.info(f"  [DEBUG] FLIRT: Registering MNI {template_type} Template to Subject MRA...")
         mni_in_mra_img = os.path.join(output_dir, f"MNI_in_{mra_prefix}.nii.gz")
         combined_mat = os.path.join(output_dir, f"{mra_prefix}_MNI_to_MRA_combined.mat")
         run_cmd([
-            "flirt", "-in", mni_t1_whole, "-ref", image_path, 
+            "flirt", "-in", mni_template, "-ref", image_path, 
             "-out", mni_in_mra_img, "-omat", combined_mat, 
             "-dof", "12", "-cost", "normmi", "-bins", "32",
-            "-searchrx", "-180", "180", 
-            "-searchry", "-180", "180", 
-            "-searchrz", "-180", "180"
+            "-searchrx", "-180", "180", "-searchry", "-180", "180", "-searchrz", "-180", "180"
         ])
 
     # ---------------------------------------------------------
     # COMMON FINAL STEPS
     # ---------------------------------------------------------
-    # 5.5 CREATE INVERSE MATRIX
-    logger.info(f"  [DEBUG 5.5/6] CONVERT_XFM: Inverting combined matrix (MRA -> MNI)...")
+    logger.info("  [DEBUG] CONVERT_XFM: Inverting combined matrix (MRA -> MNI)...")
     mra_to_mni_mat = os.path.join(output_dir, f"{mra_prefix}_MRA_to_MNI_inverse.mat")
     run_cmd(["convert_xfm", "-omat", mra_to_mni_mat, "-inverse", combined_mat])
 
-    # 6. FINAL WARP: MNI PARCELLATION -> MRA
-    logger.info(f"  [DEBUG 6/6] APPLYXFM: Warping MNI Parcellation to MRA space...")
+    logger.info("  [DEBUG] APPLYXFM: Warping MNI Parcellation to MRA space...")
     reg_parcellation_path = os.path.join(output_dir, f"{mra_prefix}_registered_parcellation.nii.gz")
     run_cmd([
         "flirt", "-in", mni_parcellation, "-ref", image_path, 
@@ -164,8 +246,7 @@ def atlas_registration(
         "-interp", "nearestneighbour"
     ])
 
-    # 7. EXPAND propagated parcellation
-    logger.info(f"  [DEBUG 7/7] IMAGEMATHS: Dilating parcellation labels into the background...")
+    logger.info("  [DEBUG] IMAGEMATHS: Dilating parcellation labels into the background...")
     dilated_parcellation_path = os.path.join(output_dir, f"{mra_prefix}_registered_parcellation_dilated.nii.gz")
     run_cmd([
         "fslmaths", reg_parcellation_path, 
@@ -173,12 +254,15 @@ def atlas_registration(
         dilated_parcellation_path
     ])
 
-    # 8. CLEANUP: Remove intermediate files if needed
-    os.remove(t1_fov) if image_t1 and os.path.exists(image_t1) else None
-    os.remove(t1_brain) if image_t1 and os.path.exists(image_t1) else None
-    os.remove(t1_reoriented) if image_t1 and os.path.exists(image_t1) else None
-    os.remove(mni_in_t1_img) if image_t1 and os.path.exists(image_t1) else None
-    
+    # 8. CLEANUP
+    for f in files_to_cleanup:
+        if os.path.exists(f):
+            os.remove(f)
+
+    # 9. QUALITY CONTROL SNAPSHOT
+    if generate_qc:
+        qc_output = os.path.join(output_dir, f"{mra_prefix}_QC_snapshot.png")
+        generate_qc_snapshot(image_path, reg_parcellation_path, qc_output)
 
     return dilated_parcellation_path, mra_to_mni_mat
 
@@ -188,16 +272,16 @@ def process_registration(
     mni_parcellation=None, 
     mni_t1_template=None, 
     image_t1_path=None, 
-    denoise=False, 
-    debias=False
+    preprocess_mra=False, 
+    preprocess_t1=False,
+    mra_stripped=False,
+    t1_stripped=False,
+    generate_qc=False
 ):
     
-    # --- FALLBACK LOGIC ---
     if mni_parcellation is None:
         mni_parcellation = DEFAULT_PARCELLATION
 
-    # If the user provides a single custom template via CLI, we override both logic paths with it.
-    # Otherwise, we use our smart dual-template system.
     if mni_t1_template is not None:
         mni_t1_brain = mni_t1_template
         mni_t1_whole = mni_t1_template
@@ -205,20 +289,19 @@ def process_registration(
         mni_t1_brain = DEFAULT_MNI_T1_BRAIN
         mni_t1_whole = DEFAULT_MNI_T1_WHOLE
 
-    # --- VERIFICATION ---
-    # Validate the files we are actively going to use based on the route
     required_files = [(mni_parcellation, "MNI Parcellation")]
+    
     if image_t1_path and os.path.exists(image_t1_path):
         required_files.append((mni_t1_brain, "MNI T1 Brain Template"))
     else:
-        required_files.append((mni_t1_whole, "MNI T1 Whole Template"))
+        if mra_stripped:
+            required_files.append((mni_t1_brain, "MNI T1 Brain Template"))
+        else:
+            required_files.append((mni_t1_whole, "MNI T1 Whole Template"))
 
     for path, name in required_files:
         if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"{name} not found at: {path}\n"
-                "Please provide it via CLI or ensure the file exists in the 'Atlas/' folder."
-            )
+            raise FileNotFoundError(f"{name} not found at: {path}\n")
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -229,25 +312,30 @@ def process_registration(
         image_path=image_path,
         output_dir=output_dir,
         image_t1=image_t1_path,
-        denoise_mra=denoise,
-        debias_mra=debias
+        preprocess_mra=preprocess_mra,
+        preprocess_t1=preprocess_t1,
+        mra_stripped=mra_stripped,
+        t1_stripped=t1_stripped,
+        generate_qc=generate_qc
     )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Atlas to MRA Registration Module")
     
-    # Required Image
     parser.add_argument("--image", required=True, help="Path to the reference MRA image.")
-    
-    # Optional Arguments
-    parser.add_argument("--t1", default=None, help="Path to the subject T1 image (if omitted, direct MNI->MRA is used).")
-    parser.add_argument("--parcellation", default=None, help="Path to custom MNI parcellation (defaults to Atlas/ArterialAtlas.nii.gz).")
-    parser.add_argument("--template", default=None, help="Override path for the MNI template (disables smart Whole/Brain selection).")
+    parser.add_argument("--t1", default=None, help="Path to the subject T1 image.")
+    parser.add_argument("--parcellation", default=None, help="Path to custom MNI parcellation.")
+    parser.add_argument("--template", default=None, help="Override path for the MNI template.")
     parser.add_argument("--output_dir", default=".", help="Directory to save outputs.")
     
-    # ANTs Preprocessing flags
-    parser.add_argument("--denoise", action="store_true", help="Apply ANTs DenoiseImage (Non-Local Means) to the MRA.")
-    parser.add_argument("--debias", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the MRA.")
+    parser.add_argument("--preprocess_MRA", action="store_true", help="Apply ANTs Denoise & N4 Bias Correction to MRA.")
+    parser.add_argument("--preprocess_T1", action="store_true", help="Apply ANTs N4 Bias Correction to T1.")
+    
+    parser.add_argument("--mra_stripped", action="store_true", help="Flag if the input MRA is already skull-stripped.")
+    parser.add_argument("--t1_stripped", action="store_true", help="Flag if the input T1 is already skull-stripped.")
+    
+    # New QC Flag
+    parser.add_argument("--qc", action="store_true", help="Generate a PNG snapshot of the registered labels for Quality Control.")
 
     args = parser.parse_args()
 
@@ -258,8 +346,11 @@ if __name__ == "__main__":
             mni_parcellation=args.parcellation,
             mni_t1_template=args.template,
             image_t1_path=args.t1,
-            denoise=args.denoise,
-            debias=args.debias
+            preprocess_mra=args.preprocess_MRA,
+            preprocess_t1=args.preprocess_T1,
+            mra_stripped=args.mra_stripped,
+            t1_stripped=args.t1_stripped,
+            generate_qc=args.qc
         )
         logger.info(f"Registration successful! Outputs saved to: {args.output_dir}")
     except Exception as e:

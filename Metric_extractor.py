@@ -201,7 +201,7 @@ def extract_segments_from_component_using_shortest_path(G_comp, distance_map):
 
     return segment_lists, segment_counts_list
 
-def save_results(results, output_folder, save_segment_masks, save_conn_comp_masks):
+def save_results(results, output_folder, save_segment_masks, save_conn_comp_masks, region_true_volumes=None):
     print("  Saving results...")
     general_keys = [
         'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
@@ -279,6 +279,14 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
         for region_label, group in region_groups:
             row = {'region_label': region_label, 'num_components': len(group)}
             for metric in summary_metrics: row[metric] = group[metric].sum()
+
+            # Apply the ground-truth mask volume once, at the aggregate region
+            # level, instead of on a single component row -- doing it earlier
+            # (per-component) would get re-summed here alongside sibling
+            # components' cylinder approximations and double-count it.
+            if region_true_volumes and region_label in region_true_volumes:
+                row['volume_approx_cylinder'] = row.get('volume', np.nan)
+                row['volume'] = region_true_volumes[region_label]
 
             total_len = group['total_length'].sum()
             for col in tortuosity_cols:
@@ -485,7 +493,7 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
     if mask_path and os.path.exists(mask_path):
         try:
             mask_img = nib.load(mask_path)
-            true_mask_data = mask_img.get_fdata() > 0
+            true_mask_data = np.asarray(mask_img.dataobj) > 0
             voxel_volume_mm3 = np.prod(mask_img.header.get_zooms()[:3])
             
             # NEW: Calculate the absolute total volume of the entire mask
@@ -500,7 +508,7 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
     if use_atlas:
         # Load Atlas with Nibabel instead of SimpleITK to avoid LPS/RAS coordinate flipping!
         aligned_atlas_img = nib.load(registered_atlas_path)
-        aligned_atlas_data = np.round(aligned_atlas_img.get_fdata()).astype(int)
+        aligned_atlas_data = np.round(aligned_atlas_img.get_fdata(dtype=np.float32)).astype(np.int16)
         inv_affine = np.linalg.inv(aligned_atlas_img.affine)
         
         region_nodes = {}
@@ -524,24 +532,23 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             except Exception as e:
                 raise ValueError(f"Failed to transform point {pos} to index in atlas. Error: {e}")
             
+        region_true_volumes = {}
         for r_id in sorted(region_nodes.keys()):
             r_id_int = int(r_id) # Absolute safety cast for dictionary matching
             r_name = label_map.get(r_id_int, f"region_{r_id_int}")
-            
+
             sub_G = G.subgraph(region_nodes[r_id]).copy()
             region_result = compute_metrics_for_mask(sub_G, node_radius_map, selected_metrics)
-            
-            # Inject True Regional Volume
+
+            # Record True Regional Volume (applied once at region-summary level
+            # in save_results, not per-component -- see region_true_volumes).
             if 'volume' in selected_metrics and true_mask_data is not None:
                 region_voxel_count = np.sum(true_mask_data & (aligned_atlas_data == r_id))
-                true_vol = region_voxel_count * voxel_volume_mm3
-                if 0 in region_result:
-                    region_result[0]['volume_approx_cylinder'] = region_result[0].get('volume', 0)
-                    region_result[0]['volume'] = true_vol
-                    
+                region_true_volumes[r_id_int] = region_voxel_count * voxel_volume_mm3
+
             results['region_metrics'][r_id_int] = region_result
-        
-        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None)
+
+        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes)
     
         n_regions = len(region_nodes)
         print(f"  Found {n_regions} arterial regions. Generating regional VTPs for {patient_name}...")
@@ -576,24 +583,66 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             combined_vtp.write(regional_vtp_path)
             print(f"  -> Saved combined VTP with {n_regions} regions to: {regional_vtp_path}")
             
-        # --- NEW: SAVE GLOBAL TOTALS ---
-        global_length = G.size(weight='weight')
+        # --- NEW: SAVE TRUE GLOBAL TOTALS FOR ALL METRICS ---
+        print("  Computing true global metrics on the full unparcellated graph...")
+        # Compute all metrics on the full graph G
+        true_global_result = compute_metrics_for_mask(G, node_radius_map, selected_metrics)
         
-        # Estimate global volume using the cylinder approximation
-        estimated_global_volume = 0.0
-        for u, v, d in G.edges(data=True):
-            l = d.get('weight', 0)
-            r = (node_radius_map.get(u, 0.5) + node_radius_map.get(v, 0.5)) / 2.0
-            estimated_global_volume += l * np.pi * (r ** 2)
+        # Aggregate all disconnected components for the global summary
+        global_data = {
+            'total_length': 0.0,
+            'num_bifurcations': 0,
+            'volume': 0.0,
+            'num_loops': 0,
+            'num_abnormal_degree_nodes': 0
+        }
+        
+        # Variables for length-weighted tortuosity averages
+        tortuosity_cols = [
+            'Largest_endpoint_root_mean_curvature', 'Largest_endpoint_root_mean_square_curvature',
+            '2nd_Largest_endpoint_root_mean_curvature', '2nd_Largest_endpoint_root_mean_square_curvature',
+            'Largest_bifurcation_root_mean_curvature', 'Largest_bifurcation_root_mean_square_curvature'
+        ]
+        tortuosity_sums = {col: 0.0 for col in tortuosity_cols}
+        
+        for cid, comp_data in true_global_result.items():
+            comp_length = comp_data.get('total_length', 0)
             
-        # Use exact mask volume if available, otherwise fallback to the cylinder estimate
-        final_volume = total_true_volume 
+            # Sum up additive metrics
+            global_data['total_length'] += comp_length
+            global_data['num_bifurcations'] += comp_data.get('num_bifurcations', 0)
+            global_data['volume'] += comp_data.get('volume', 0)
+            global_data['num_loops'] += comp_data.get('num_loops', 0)
+            global_data['num_abnormal_degree_nodes'] += comp_data.get('num_abnormal_degree_nodes', 0)
+            
+            # Accumulate length-weighted tortuosity
+            agg = comp_data.get('aggregated_tortuosity_by_root', [])
+            prefixes = ['Largest_endpoint_root_', '2nd_Largest_endpoint_root_', 'Largest_bifurcation_root_']
+            
+            for i, prefix in enumerate(prefixes):
+                if i < len(agg):
+                    mean_curv = agg[i].get('mean_curvature', np.nan)
+                    mean_sq_curv = agg[i].get('mean_square_curvature', np.nan)
+                    
+                    if not np.isnan(mean_curv):
+                        tortuosity_sums[prefix + 'mean_curvature'] += mean_curv * comp_length
+                    if not np.isnan(mean_sq_curv):
+                        tortuosity_sums[prefix + 'mean_square_curvature'] += mean_sq_curv * comp_length
 
-        global_df = pd.DataFrame([{
-            'total_global_volume_mm3': final_volume,
-            'estimated_cylinder_volume_mm3': estimated_global_volume,
-            'total_global_length_mm': global_length
-        }])
+        # Finalize length-weighted averages
+        if global_data['total_length'] > 0:
+            for col in tortuosity_cols:
+                global_data[col] = tortuosity_sums[col] / global_data['total_length']
+        else:
+            for col in tortuosity_cols:
+                global_data[col] = np.nan
+                
+        # Inject True Global Volume from mask if available
+        if 'volume' in selected_metrics and true_mask_data is not None:
+            global_data['volume_approx_cylinder'] = global_data.get('volume', 0)
+            global_data['volume'] = total_true_volume
+            
+        global_df = pd.DataFrame([global_data])
         global_df.to_csv(os.path.join(output_folder, 'global_summary.csv'), index=False)
     
     else:
@@ -603,17 +652,17 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
         Path(output_folder).mkdir(parents=True, exist_ok=True)
         
         global_result = compute_metrics_for_mask(G, node_radius_map, selected_metrics)
-        
-        # Inject True Global Volume
+
+        # Record True Global Volume under the 'global' pseudo-region key that
+        # save_results() uses when there's no atlas (applied once at the
+        # region-summary level, not per-component).
+        region_true_volumes = {}
         if 'volume' in selected_metrics and true_mask_data is not None:
             total_voxel_count = np.sum(true_mask_data)
-            true_vol = total_voxel_count * voxel_volume_mm3
-            if 0 in global_result:
-                global_result[0]['volume_approx_cylinder'] = global_result[0].get('volume', 0)
-                global_result[0]['volume'] = true_vol
-                
+            region_true_volumes['global'] = total_voxel_count * voxel_volume_mm3
+
         results.update(global_result)
-        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None)
+        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes)
 
 # =========================================================================
 #                         STANDALONE CLI EXECUTION

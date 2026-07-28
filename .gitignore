@@ -3,6 +3,10 @@ Results*/
 IXI*/
 tests*/
 
+# Random files
+IXI.csv
+run*
+
 # Python
 __pycache__/
 *.py[cod]
