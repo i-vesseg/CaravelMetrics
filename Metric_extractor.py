@@ -859,9 +859,9 @@ def extract_metrics(patient_name, output_folder, graph_pkl_path, selected_metric
                     if region_id > 0:
                         if region_id not in region_nodes: region_nodes[region_id] = []
                         region_nodes[region_id].append(n)
-            except:
+            except Exception as e:
                 # Raise error if index transformation fails
-                raise ValueError(f"Failed to transform point {pos} to index in atlas.")
+                raise ValueError(f"Failed to transform point {pos} to index in atlas.") from e
             
         for r_id in sorted(region_nodes.keys()):
             r_name = label_map.get(r_id, f"{r_id}")

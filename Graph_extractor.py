@@ -27,6 +27,16 @@ MERGE_DISTANCE = 3.0
 MIN_ANGLE = 30.0
 
 # 5. ALIGNMENT MATRIX
+# Frame convention (verified, not assumed):
+#   Node 'pos' is saved in LPS+: built from the NIfTI affine (RAS+), then
+#   Laplacian-smoothed (still RAS+), then this SLICER_MATRIX (RAS+ -> LPS+,
+#   sign flip on x/y) is applied just before saving -- see step 8 below.
+#   ITK/SimpleITK physical space is LPS. 3D Slicer reads .vtk/.vtp/.stl
+#   assuming LPS by default (since 4.11) and flips to its internal RAS.
+#   So: SimpleITK consumers (Metric_extractor's atlas loop) and .vtp exports
+#   use 'pos' directly, no transform needed. nibabel consumers (NIfTI is
+#   RAS+) MUST invert with SLICER_MATRIX first -- Vessel_aggregator is
+#   currently the only one that does (see _pos_to_voxel_index).
 SLICER_MATRIX = np.array([
     [-1.0, 0.0, 0.0, 0.0],
     [0.0, -1.0, 0.0, 0.0],
