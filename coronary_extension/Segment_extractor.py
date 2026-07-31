@@ -36,6 +36,25 @@ Reused from the existing codebase (see Step 0 inspection):
       in the codebase, and none is needed here: build_segments works
       purely on graph topology, not on world coordinates.
 """
+import os
+import sys
+
+# Repo layout: this module lives in coronary_extension/, one level below the
+# repo root, alongside the untouched CaravelMetrics baseline (Graph_extractor,
+# Metric_extractor, ...) and sibling coronary_extension/ modules. Neither
+# directory is a pip-installed package (pyproject.toml: package = false), so
+# the flat `from Metric_extractor import ...` / `from Segment_extractor
+# import ...` style imports below only resolve if both directories are on
+# sys.path -- true automatically when this file is imported by a root script
+# (run_demo.py, Batch_runner.py), but not when this file is run directly
+# (`python coronary_extension/Segment_extractor.py`). Adding both here makes
+# every existing import statement work unchanged in both cases.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_THIS_DIR)
+for _p in (_REPO_ROOT, _THIS_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import logging
 
 import networkx as nx
@@ -143,6 +162,121 @@ def build_segments(G):
         seg['metrics'] = compute_tortuosity_metrics(pts)
 
     return segments, edge_to_seg, node_to_segs
+
+
+def build_segments_merged(G):
+    """
+    Like build_segments, but degenerate segments (< N_MIN nodes) are removed
+    from the graph first, so their neighbors merge across them instead of
+    staying split at the (now non-topological) node(s) the degenerate
+    segment used to occupy.
+
+    Approach: clean-graph + re-run, not a hand-rolled stitching pass.
+    build_segments(G) is run once to find degenerate segments; each one's
+    edges and INTERIOR nodes (never its shared endpoint nodes, which may
+    still be needed by other, non-degenerate segments) are removed from a
+    copy of G; then build_segments is re-run on that cleaned graph.
+
+    Why this is enough to handle multi-hop cases: a topo node's status
+    (endpoint/bifurcation/pass-through) is derived purely from G.degree(n)
+    inside build_segments. Removing a degenerate segment's edge(s) at a
+    shared endpoint lowers that node's degree in the cleaned graph. If the
+    node had 3 non-degenerate-adjacent... i.e. if exactly 2 non-degenerate
+    segments remain incident to it, its cleaned-graph degree is exactly 2,
+    so build_segments' own `degree(n) != 2` test reclassifies it as a
+    pass-through and walks straight through it -- merging the two flanking
+    segments -- with no special-casing needed here. If instead >=3 non-
+    degenerate segments still meet there, degree stays >=3 and it remains a
+    genuine bifurcation (no merge); if only 1 remains, degree is 1 and the
+    node becomes a new leaf (a spur trimmed, not a merge); if 0 remain, the
+    node is isolated and dropped. Chains of several adjacent degenerate
+    segments fall out of this the same way, one degree recomputation at a
+    time, without needing to be walked explicitly.
+
+    Because the re-run is a full build_segments call, merged segments get
+    a genuine compute_tortuosity_metrics spline refit on their full,
+    concatenated node chain -- not an aggregation of the pre-merge metrics.
+
+    A merged segment can only be a concatenation of segments that were each
+    already >= N_MIN nodes (only non-degenerate segments survive to be
+    merged), sharing one node, so it can never itself end up degenerate;
+    this is asserted rather than assumed (see below). That is also why a
+    single clean+re-run pass suffices, with no iteration.
+
+    Internal-bridge safety check: in an (acyclic) vessel tree, every edge is
+    a cut edge. Most degenerate segments are dead-end spurs (one endpoint is
+    a degree-1 leaf that simply vanishes), which is harmless. But if a
+    degenerate segment instead sits as an internal bridge between two
+    otherwise-unconnected parts of the tree (both endpoints resolve to
+    pass-through, with real branches continuing on both far sides), removing
+    it does not just "stitch a hallway" -- it disconnects the tree into more
+    components than G had. This is detected by comparing
+    nx.number_connected_components before/after and logged as a WARNING
+    (not raised) naming the offending segment(s), since a downstream
+    ostium->target path that used to cross that bridge will no longer exist.
+
+    Parameters:
+        G : networkx.Graph, as passed to build_segments.
+
+    Returns:
+        merged_segments, edge_to_seg, node_to_segs : same shapes as
+            build_segments' return value, computed on the cleaned graph.
+        G_clean : networkx.Graph, the graph merged_segments/edge_to_seg were
+            computed on (G with degenerate segments' edges and interior
+            nodes removed, and any resulting isolated nodes dropped).
+            Downstream callers must use G_clean, not G, for anything that
+            has to stay consistent with edge_to_seg (shortest paths, point
+            snapping, VTP export, ...): passing raw G to Path_analyzer.
+            path_to_point alongside this edge_to_seg would raise a bare
+            KeyError the moment a shortest path traverses an edge that
+            belonged to a removed degenerate segment.
+    """
+    segments0, _, _ = build_segments(G)
+    degenerate0 = [s for s in segments0 if s['degenerate']]
+
+    G_clean = G.copy()
+    for seg in degenerate0:
+        nodes = seg['nodes']
+        G_clean.remove_edges_from(zip(nodes[:-1], nodes[1:]))
+        G_clean.remove_nodes_from(nodes[1:-1])  # interior nodes only, never endpoints
+
+    isolated = list(nx.isolates(G_clean))
+    G_clean.remove_nodes_from(isolated)
+
+    n_components_before = nx.number_connected_components(G)
+    n_components_after = nx.number_connected_components(G_clean)
+    if n_components_after > n_components_before:
+        comp_id = {}
+        for i, comp in enumerate(nx.connected_components(G_clean)):
+            for n in comp:
+                comp_id[n] = i
+        bridge_seg_ids = [
+            seg['id'] for seg in degenerate0
+            if seg['endpoints'][0] in comp_id and seg['endpoints'][1] in comp_id
+            and comp_id[seg['endpoints'][0]] != comp_id[seg['endpoints'][1]]
+        ]
+        logger.warning(
+            "build_segments_merged: removing degenerate segment(s) %s acted as an "
+            "internal bridge, not a spur -- connected components went from %d to %d. "
+            "A downstream ostium->target path that used to cross this segment no "
+            "longer exists in G_clean.",
+            bridge_seg_ids, n_components_before, n_components_after,
+        )
+
+    merged_segments, edge_to_seg, node_to_segs = build_segments(G_clean)
+
+    still_degenerate = [s for s in merged_segments if s['degenerate']]
+    if still_degenerate:
+        raise RuntimeError(
+            f"{len(still_degenerate)} merged segment(s) are still degenerate "
+            f"(< {N_MIN} nodes) after a single clean+re-run pass -- a merged "
+            "segment should never be degenerate (it concatenates two "
+            "already-non-degenerate segments), so this indicates a bug "
+            f"rather than something a second pass should silently paper over. "
+            f"Offending segment ids: {[s['id'] for s in still_degenerate]}"
+        )
+
+    return merged_segments, edge_to_seg, node_to_segs, G_clean
 
 
 def segments_to_dataframe(segments, G):
@@ -281,3 +415,55 @@ if __name__ == "__main__":
     csv_path = os.path.join(scratch_dir, "segments_table.csv")
     df.to_csv(csv_path, index=False)
     print(f"\nSaved segments table CSV: {csv_path}")
+
+    # --- Degenerate-merging: build_segments_merged on a cleaned copy of G ---
+    print("\n--- build_segments_merged ---")
+    degenerate0 = [s for s in segments if s['degenerate']]
+    merged_segments, merged_edge_to_seg, merged_node_to_segs, merged_G_clean = build_segments_merged(G)
+
+    n_merged_degenerate = sum(1 for s in merged_segments if s['degenerate'])
+    print(f"Segments before merging: {len(segments)} ({len(degenerate0)} degenerate)")
+    print(f"Segments after merging:  {len(merged_segments)} ({n_merged_degenerate} degenerate, expect 0)")
+    assert n_merged_degenerate == 0, "A merged segment came out degenerate -- should be impossible!"
+
+    # --- Relaxed invariants: length/edges "lost" must equal exactly the removed
+    # degenerate segments' own length/edges -- that loss is intentional (the
+    # discarded stubs/bridges themselves), nothing else may go missing. ---
+    covered_edges_merged = sum(len(s['nodes']) - 1 for s in merged_segments)
+    removed_degenerate_edges = sum(len(s['nodes']) - 1 for s in degenerate0)
+    skipped_edges = sum(
+        G.subgraph(c).number_of_edges()
+        for c in nx.connected_components(G)
+        if not (c & {n for n in G if G.degree(n) != 2})
+    )
+    print(f"\nEdges in merged segments:        {covered_edges_merged}")
+    print(f"Edges in removed degenerates:     {removed_degenerate_edges}")
+    print(f"Edges in skipped pure cycles:     {skipped_edges}")
+    print(f"Total graph edges:                {G.number_of_edges()}")
+    assert covered_edges_merged + removed_degenerate_edges + skipped_edges == G.number_of_edges(), \
+        "Merged-edge accounting doesn't add up to the total graph edge count!"
+    print("OK: merged + removed-degenerate + skipped-cycle edges == total graph edges.")
+
+    total_graph_length = G.size(weight='weight')
+    merged_length = sum(
+        G[u][v]['weight']
+        for s in merged_segments
+        for u, v in zip(s['nodes'][:-1], s['nodes'][1:])
+    )
+    removed_degenerate_length = sum(
+        G[u][v]['weight']
+        for s in degenerate0
+        for u, v in zip(s['nodes'][:-1], s['nodes'][1:])
+    )
+    skipped_length = sum(
+        G.subgraph(c).size(weight='weight')
+        for c in nx.connected_components(G)
+        if not (c & {n for n in G if G.degree(n) != 2})
+    )
+    print(f"\nMerged segment length:            {merged_length:.3f}")
+    print(f"Removed-degenerate length:        {removed_degenerate_length:.3f}")
+    print(f"Skipped pure-cycle length:        {skipped_length:.3f}")
+    print(f"Total graph length:               {total_graph_length:.3f}")
+    assert abs((merged_length + removed_degenerate_length + skipped_length) - total_graph_length) < 1e-6, \
+        "Merged-length accounting doesn't add up to the total graph length!"
+    print("OK: merged + removed-degenerate + skipped-cycle length == total graph length (by design).")

@@ -11,9 +11,28 @@ Reuses the same vtk-based polyline export pattern already used elsewhere in
 the codebase (Metric_extractor._write_segment_vtp), applied here to the
 new build_segments() output instead of the shortest-path segments.
 """
+import os
+import sys
+
+# See Segment_extractor.py's module top for why this is needed: this file
+# lives in coronary_extension/, one level below the repo root (baseline
+# CaravelMetrics modules + sibling coronary_extension/ modules), and neither
+# is a pip-installed package -- this puts both on sys.path so the flat
+# imports in __main__ below resolve whether this module is imported from a
+# root script or run directly.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_THIS_DIR)
+for _p in (_REPO_ROOT, _THIS_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # Maps the VTP cell-array name (Slicer/ParaView friendly) to the
 # corresponding key in compute_tortuosity_metrics' output.
+# fit_rmse is intentionally excluded: it's computed by evaluating the s=0
+# interpolating spline at the same parameter values used to fit it, so the
+# residual is structurally ~0 for every segment (see
+# Segment_extractor.segments_to_dataframe, which excludes it for the same
+# reason).
 _METRIC_VTP_ARRAYS = {
     'ArcLength': 'spline_arc_length',
     'ChordLength': 'spline_chord_length',
@@ -21,7 +40,6 @@ _METRIC_VTP_ARRAYS = {
     'MeanSquareCurvature': 'spline_mean_square_curvature',
     'RmsCurvature': 'spline_rms_curvature',
     'ArcOverChord': 'arc_over_chord',
-    'FitRmse': 'fit_rmse',
 }
 
 
@@ -36,7 +54,7 @@ def export_segments_vtp(segments, G, output_path):
       - Click-to-inspect: every array is attached directly to the polydata's
         CellData, so a vtkCellPicker on this model can read a segment's full
         metrics straight off the picked cell, with no lookup table or
-        companion file needed (see slicer_segment_picker.py).
+        companion file needed.
 
     Degenerate segments (no metrics computed) get NaN for every metric
     array; VTK float arrays store NaN natively.
