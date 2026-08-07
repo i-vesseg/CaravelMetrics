@@ -268,6 +268,115 @@ def _aggregate_curvature(length_metrics_pairs):
     return mean_curv, mean_curv2, rms_curv, excluded_frac
 
 
+def _terminal_direction(pts_window):
+    """
+    Least-squares dominant direction (unit vector) of an ordered point
+    window: the first principal axis (SVD) of the centered points, oriented
+    along the window's actual traversal (first point -> last point). Used
+    instead of a single node-to-node step vector so voxel-level jitter in
+    the underlying skeleton doesn't dominate the tangent estimate right at
+    a junction.
+    """
+    pts_window = np.asarray(pts_window)
+    if len(pts_window) < 2:
+        return None
+    centered = pts_window - pts_window.mean(axis=0)
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    direction = vt[0]
+    if np.dot(direction, pts_window[-1] - pts_window[0]) < 0:
+        direction = -direction
+    norm = np.linalg.norm(direction)
+    if norm < 1e-9:
+        return None
+    return direction / norm
+
+
+def _discrete_polyline_turning(pts):
+    """
+    Fallback total turning (radians) for a segment too short to fit a cubic
+    spline (compute_tortuosity_metrics returns spline_mean_curvature=NaN for
+    <4 points, see Metric_extractor.py): sum of the discrete angles between
+    consecutive edge vectors along the segment's own node chain, so such
+    segments still contribute to total_turning instead of being silently
+    dropped.
+    """
+    pts = np.asarray(pts)
+    if len(pts) < 3:
+        return 0.0
+    vecs = np.diff(pts, axis=0)
+    norms = np.linalg.norm(vecs, axis=1)
+    total = 0.0
+    for k in range(len(vecs) - 1):
+        n1, n2 = norms[k], norms[k + 1]
+        if n1 < 1e-9 or n2 < 1e-9:
+            continue
+        cos_angle = np.dot(vecs[k], vecs[k + 1]) / (n1 * n2)
+        total += np.arccos(np.clip(cos_angle, -1.0, 1.0))
+    return float(total)
+
+
+def _segment_turning(seg_metrics, seg_pts):
+    """
+    A single elementary segment's own turning (radians): its precomputed
+    spline_mean_curvature (see _path_turning docstring -- despite the name,
+    it is already an INTEGRAL of curvature over the segment's arc length,
+    i.e. a turning angle in radians, not a per-length mean) if finite, else
+    the discrete polyline fallback (_discrete_polyline_turning) computed
+    from the segment's own node positions -- covers degenerate segments
+    (<4 nodes, where seg_metrics is None or spline_mean_curvature is NaN) so
+    they still contribute to total_turning.
+    """
+    turning = seg_metrics.get('spline_mean_curvature') if seg_metrics is not None else None
+    if turning is None or np.isnan(turning):
+        return _discrete_polyline_turning(seg_pts)
+    return float(turning)
+
+
+def _path_turning(ordered_pts, junction_indices, seg_turnings, window=3):
+    """
+    Junction-aware total turning of a reconstructed vessel/path, recovering
+    the turn angle concentrated exactly AT a bifurcation/junction node --
+    invisible to _aggregate_curvature's length-weighted mean because a
+    junction node is only ever an ENDPOINT shared between two elementary
+    segments, never an interior sample of either one's own spline fit (see
+    the module's segment partition: every node of degree>=3 is by
+    construction a segment boundary, not an interior node). Two straight
+    segments meeting at a sharp angle at their shared junction would
+    otherwise aggregate to ~0 mean curvature despite the vessel visibly
+    turning there.
+
+        total_turning = sum(seg_turnings) + junction_turning
+
+    where seg_turnings are each segment's own turning (see _segment_turning)
+    and junction_turning sums, over each junction index i in
+    `junction_indices` (positions into `ordered_pts`), the angle between the
+    least-squares incoming tangent direction (_terminal_direction over
+    ordered_pts[max(0, i-window):i+1]) and the outgoing tangent direction
+    (_terminal_direction over ordered_pts[i:i+window+1]). This is a discrete
+    tangent DISCONTINUITY at the joint that is not part of either adjacent
+    segment's own integral, so adding it here is not double-counting the
+    same turning twice.
+
+    Returns (total_turning, junction_turning, n_junctions) -- n_junctions is
+    the number of junction indices for which both terminal directions could
+    actually be estimated (excludes degenerate near-zero-length windows).
+    """
+    junction_angles = []
+    for i in junction_indices:
+        incoming = _terminal_direction(ordered_pts[max(0, i - window):i + 1])
+        outgoing = _terminal_direction(ordered_pts[i:i + window + 1])
+        if incoming is None or outgoing is None:
+            continue
+        cos_angle = np.dot(incoming, outgoing)
+        junction_angles.append(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
+
+    junction_turning = float(np.sum(junction_angles)) if junction_angles else 0.0
+    n_junctions = len(junction_angles)
+    seg_turning_total = float(np.sum(seg_turnings)) if len(seg_turnings) else 0.0
+    total_turning = seg_turning_total + junction_turning
+    return total_turning, junction_turning, n_junctions
+
+
 def aggregate_vessel_metrics(seg_ids, segments, G, min_branch_length=MIN_BRANCH_LENGTH_MM):
     """
     Reassemble the whole vessel made of the elementary segments `seg_ids` and
@@ -300,21 +409,48 @@ def aggregate_vessel_metrics(seg_ids, segments, G, min_branch_length=MIN_BRANCH_
     replaced as above and a curv_excluded_length_frac field added for
     multi-segment vessels -- the fraction of vessel length whose segment had
     NaN curvature and was excluded from that aggregation).
+
+    metrics also always carries 4 junction-aware turning fields (see
+    _path_turning): total_turning and junction_turning (radians),
+    n_junctions, and soam = total_turning / length (rad/mm, NaN if
+    length <= 0) -- these recover the turn angle concentrated exactly at an
+    internal bifurcation/junction node of the reconstructed vessel, which
+    the length-weighted curvature aggregation above cannot see (a junction
+    node is only ever a segment ENDPOINT, never an interior spline sample).
     """
     if not seg_ids:
+        empty_metrics = compute_tortuosity_metrics(np.zeros((0, 3)))
+        empty_metrics['total_turning'] = np.nan
+        empty_metrics['junction_turning'] = np.nan
+        empty_metrics['n_junctions'] = 0
+        empty_metrics['soam'] = np.nan
         return {
             'seg_ids': [], 'n_elementary': 0, 'n_pruned': 0, 'length': 0.0,
             'non_simple_path': False, 'endpoints': None,
-            'metrics': compute_tortuosity_metrics(np.zeros((0, 3))),
+            'metrics': empty_metrics,
         }
 
     if len(seg_ids) == 1:
         seg = segments[seg_ids[0]]
         pts = np.array([G.nodes[n]['pos'] for n in seg['nodes']])
-        metrics = seg['metrics'] if seg['metrics'] is not None else compute_tortuosity_metrics(pts)
+        # Copy rather than reuse seg['metrics'] directly: it's the SAME dict
+        # object stored on `segments`, shared across every vessel that
+        # includes this segment -- mutating it in place below (adding the 4
+        # turning fields) would leak vessel-level fields into that shared,
+        # per-segment cache.
+        metrics = (
+            dict(seg['metrics']) if seg['metrics'] is not None
+            else compute_tortuosity_metrics(pts)
+        )
+        length = _segment_length(seg, G)
+        turning = _segment_turning(seg['metrics'], pts)
+        metrics['total_turning'] = turning
+        metrics['junction_turning'] = 0.0
+        metrics['n_junctions'] = 0
+        metrics['soam'] = (turning / length) if length > 0 else np.nan
         return {
             'seg_ids': seg_ids, 'n_elementary': 1, 'n_pruned': 0,
-            'length': _segment_length(seg, G), 'non_simple_path': False,
+            'length': length, 'non_simple_path': False,
             'endpoints': seg['endpoints'], 'metrics': metrics,
         }
 
@@ -371,6 +507,29 @@ def aggregate_vessel_metrics(seg_ids, segments, G, min_branch_length=MIN_BRANCH_
     metrics['spline_rms_curvature'] = rms_curv
     metrics['curv_excluded_length_frac'] = excluded_frac
 
+    # Junction-aware turning (see _path_turning): the pruned segments'
+    # own turnings, plus the turn angle at each internal junction node of
+    # `ordered_nodes` -- i.e. every degree>=3 node strictly between the two
+    # path endpoints (degree is looked up on the FULL graph G, not subG,
+    # since a junction's other branches were pruned out of subG but still
+    # make it a real anatomical bifurcation).
+    junction_indices = [
+        i for i in range(1, len(ordered_nodes) - 1)
+        if G.degree(ordered_nodes[i]) >= 3
+    ]
+    seg_turnings = [
+        _segment_turning(
+            segments[seg_id]['metrics'],
+            np.array([G.nodes[n]['pos'] for n in segments[seg_id]['nodes']]),
+        )
+        for seg_id in pruned_ids
+    ]
+    total_turning, junction_turning, n_junctions = _path_turning(pts, junction_indices, seg_turnings)
+    metrics['total_turning'] = total_turning
+    metrics['junction_turning'] = junction_turning
+    metrics['n_junctions'] = n_junctions
+    metrics['soam'] = (total_turning / length) if length > 0 else np.nan
+
     return {
         'seg_ids': pruned_ids, 'n_elementary': len(pruned_ids), 'n_pruned': n_pruned,
         'length': length, 'non_simple_path': non_simple_path,
@@ -378,7 +537,7 @@ def aggregate_vessel_metrics(seg_ids, segments, G, min_branch_length=MIN_BRANCH_
     }
 
 
-def aggregate_path_metrics(result):
+def aggregate_path_metrics(result, G=None):
     """
     One vessel-level row for a single ostium->endpoint path, from a
     Path_analyzer.path_to_point() `result` dict. This is the batch/endpoint
@@ -405,12 +564,24 @@ def aggregate_path_metrics(result):
     always holds the segment's FULL node set, which would overshoot past the
     query point if used here.
 
+    Parameters:
+        result : dict, from Path_analyzer.path_to_point.
+        G : networkx.Graph, optional. If given, also computes the 4
+            junction-aware turning fields below, using result['path_nodes']
+            (degree looked up on G) and each segment_chain entry's own
+            nodes/metrics -- same method as aggregate_vessel_metrics, see
+            _path_turning. If None (default), those 4 fields are set to
+            None, so existing callers that don't pass G keep working
+            unchanged.
+
     Returns a dict: n_elementary, length, arc_over_chord, spline_arc_length,
     spline_chord_length, fit_rmse, mean_curvature, mean_square_curvature,
     rms_curvature, curv_excluded_length_frac, has_partial_tail (True if the
     path's last segment_chain entry is a partial chunk),
     target_snap_distance (mm, from result -- a quick QC signal for how far
-    the query point was from any graph node).
+    the query point was from any graph node), total_turning, junction_turning,
+    n_junctions, soam (radians / rad-per-mm, see _path_turning; None if G is
+    not given).
     """
     chain = result['segment_chain']
     path_metrics = result['path_metrics']
@@ -421,6 +592,27 @@ def aggregate_path_metrics(result):
     mean_curv, mean_curv2, rms_curv, excluded_frac = _aggregate_curvature(
         (entry['length'], entry['metrics']) for entry in chain
     )
+
+    if G is None:
+        total_turning = junction_turning = n_junctions = soam = None
+    else:
+        path_nodes = result['path_nodes']
+        path_pts = np.array([G.nodes[n]['pos'] for n in path_nodes])
+        junction_indices = [
+            i for i in range(1, len(path_nodes) - 1)
+            if G.degree(path_nodes[i]) >= 3
+        ]
+        seg_turnings = [
+            _segment_turning(
+                entry['metrics'],
+                np.array([G.nodes[n]['pos'] for n in entry['nodes']]),
+            )
+            for entry in chain
+        ]
+        total_turning, junction_turning, n_junctions = _path_turning(
+            path_pts, junction_indices, seg_turnings
+        )
+        soam = (total_turning / length) if length > 0 else np.nan
 
     return {
         'n_elementary': len(chain),
@@ -435,6 +627,10 @@ def aggregate_path_metrics(result):
         'curv_excluded_length_frac': excluded_frac,
         'has_partial_tail': has_partial_tail,
         'target_snap_distance': result['target_snap_distance'],
+        'total_turning': total_turning,
+        'junction_turning': junction_turning,
+        'n_junctions': n_junctions,
+        'soam': soam,
     }
 
 
@@ -446,7 +642,9 @@ def metrics_per_label(G, mask_img, segments, edge_to_seg, node_to_segs,
     MIN_BRANCH_LENGTH_MM); pass 0.0 to disable branch pruning entirely.
     Returns a list of rows: {label, n_elementary, n_pruned, length,
     arc_over_chord, mean_curvature, mean_square_curvature, rms_curvature,
-    fit_rmse, curv_excluded_length_frac, non_simple_path}.
+    fit_rmse, curv_excluded_length_frac, non_simple_path, total_turning,
+    junction_turning, n_junctions, soam}. The last 4 are the junction-aware
+    turning fields from aggregate_vessel_metrics (see _path_turning).
 
     `edge_to_seg` is currently unused in this function's body -- reserved
     for a planned Path_analyzer module that will need arbitrary-edge ->
@@ -473,6 +671,10 @@ def metrics_per_label(G, mask_img, segments, edge_to_seg, node_to_segs,
             'fit_rmse': m.get('fit_rmse'),
             'curv_excluded_length_frac': m.get('curv_excluded_length_frac'),
             'non_simple_path': agg['non_simple_path'],
+            'total_turning': m.get('total_turning'),
+            'junction_turning': m.get('junction_turning'),
+            'n_junctions': m.get('n_junctions'),
+            'soam': m.get('soam'),
         })
     return rows
 
@@ -615,3 +817,106 @@ if __name__ == "__main__":
         else:
             print(f"    OK: single simple chain found after pruning {row['n_pruned']} "
                   "short branch segment(s), as expected for a genuine single-vessel mask.")
+
+    # --- Junction-aware turning (total_turning / junction_turning / n_junctions / soam) ---
+    print("\n=== Junction-aware turning fields ===")
+
+    main_row = real_rows[0]
+    print(f"Real single-vessel mask (pruned, main vessel): "
+          f"total_turning={main_row['total_turning']:.4f} rad, "
+          f"junction_turning={main_row['junction_turning']:.4f} rad, "
+          f"n_junctions={main_row['n_junctions']}, soam={main_row['soam']:.6f} rad/mm "
+          f"(mean_curvature={main_row['mean_curvature']:.4f} for comparison)")
+
+    assert main_row['junction_turning'] >= 0, "junction_turning must be non-negative."
+    assert np.isfinite(main_row['total_turning']) and np.isfinite(main_row['soam']), \
+        "total_turning/soam should be finite (not NaN) for the main, non-degenerate vessel."
+    assert main_row['total_turning'] >= main_row['junction_turning'], (
+        "total_turning (segment turnings + junction_turning) can never be smaller "
+        "than junction_turning alone, since per-segment turnings are non-negative."
+    )
+    print("OK: junction_turning >= 0 and total_turning/soam are finite for the main vessel, "
+          "with total_turning >= junction_turning as expected.")
+
+    # --- Synthetic sharp-bend-at-a-bifurcation demo ---
+    # Real Eva_Coronaries masks don't reliably contain a "two straight
+    # segments meeting at a known sharp angle at a junction" case on demand,
+    # so this builds one directly: two perfectly straight 10 mm segments
+    # (A along +x, B along +y) sharing a junction node J, plus a short (1.5
+    # mm) third stub C off J so J is a genuine degree-3 bifurcation in G.
+    # This is exactly the blind spot _path_turning is meant to fix: A and B
+    # each have ~0 curvature on their own, so the pre-existing length-weighted
+    # mean_curvature aggregation reports ~0 for the whole vessel despite its
+    # visible 90-degree turn at J -- total_turning/soam should not.
+    print("\n=== Synthetic sharp-bend-at-a-bifurcation demo (isolates the fix) ===")
+
+    def _make_synth_segment(seg_id, nodes, G_synth):
+        pts = np.array([G_synth.nodes[n]['pos'] for n in nodes])
+        degenerate = len(nodes) < 4
+        seg_metrics = None if degenerate else compute_tortuosity_metrics(pts)
+        return {'id': seg_id, 'nodes': nodes, 'endpoints': (nodes[0], nodes[-1]),
+                'degenerate': degenerate, 'metrics': seg_metrics}
+
+    def _add_chain(G_synth, ids, positions):
+        for nid, pos in zip(ids, positions):
+            if nid not in G_synth:
+                G_synth.add_node(nid, pos=np.array(pos, dtype=float))
+        for u, v in zip(ids[:-1], ids[1:]):
+            d = np.linalg.norm(G_synth.nodes[u]['pos'] - G_synth.nodes[v]['pos'])
+            G_synth.add_edge(u, v, weight=float(d))
+
+    G_synth = nx.Graph()
+    a_ids = [f'a{i}' for i in range(11)]
+    _add_chain(G_synth, a_ids, [(float(i), 0.0, 0.0) for i in range(11)])
+    junction = a_ids[-1]  # (10, 0, 0)
+
+    b_ids = [junction] + [f'b{i}' for i in range(1, 11)]
+    _add_chain(G_synth, b_ids, [(10.0, float(i), 0.0) for i in range(11)])
+
+    c_ids = [junction] + [f'c{i}' for i in range(1, 4)]
+    _add_chain(G_synth, c_ids, [(10.0, 0.0, i * 0.5) for i in range(4)])
+
+    segments_synth = [
+        _make_synth_segment(0, a_ids, G_synth),
+        _make_synth_segment(1, b_ids, G_synth),
+        _make_synth_segment(2, c_ids, G_synth),
+    ]
+
+    synth_agg = aggregate_vessel_metrics([0, 1, 2], segments_synth, G_synth)
+    synth_m = synth_agg['metrics']
+    print(f"Two straight 10 mm segments at a 90-degree junction (stub C pruned as a short branch):")
+    print(f"  non_simple_path={synth_agg['non_simple_path']}, n_pruned={synth_agg['n_pruned']}")
+    print(f"  mean_curvature={synth_m['spline_mean_curvature']:.6f} (length-weighted, should be ~0)")
+    print(f"  total_turning={synth_m['total_turning']:.4f} rad, "
+          f"junction_turning={synth_m['junction_turning']:.4f} rad (expected ~pi/2={np.pi/2:.4f}), "
+          f"n_junctions={synth_m['n_junctions']}, soam={synth_m['soam']:.6f} rad/mm")
+
+    assert not synth_agg['non_simple_path'], "Stub C should have been pruned, leaving a clean A-B chain."
+    assert abs(synth_m['spline_mean_curvature']) < 1e-6, \
+        "The two straight segments' own aggregated mean_curvature should be ~0."
+    assert synth_m['n_junctions'] == 1, "Exactly one internal junction (J) is expected on the A-B path."
+    assert abs(synth_m['junction_turning'] - np.pi / 2) < 1e-3, \
+        "junction_turning should recover the ~90-degree bend at J."
+    assert synth_m['soam'] > 0.01, (
+        "soam must clearly be > 0 for this vessel even though mean_curvature is ~0 -- "
+        "this is the exact junction-blindness case total_turning/soam is meant to fix."
+    )
+    print("OK: mean_curvature is ~0 for this vessel, but soam/junction_turning correctly "
+          "recover the 90-degree bend at the bifurcation -- the exact case this fixes.")
+
+    single_agg = aggregate_vessel_metrics([0], segments_synth, G_synth)
+    single_m = single_agg['metrics']
+    print(f"\nSingle-segment vessel (segment A alone): junction_turning={single_m['junction_turning']}, "
+          f"n_junctions={single_m['n_junctions']}, total_turning={single_m['total_turning']:.6f}")
+    assert single_m['junction_turning'] == 0.0 and single_m['n_junctions'] == 0, \
+        "A single-segment vessel has no internal junction, so junction_turning must be exactly 0.0."
+    print("OK: single-segment vessels report junction_turning == 0.0, n_junctions == 0.")
+
+    empty_agg = aggregate_vessel_metrics([], segments_synth, G_synth)
+    empty_m = empty_agg['metrics']
+    print(f"\nEmpty vessel (no segments): total_turning={empty_m['total_turning']}, "
+          f"junction_turning={empty_m['junction_turning']}, soam={empty_m['soam']}")
+    assert np.isnan(empty_m['total_turning']) and np.isnan(empty_m['junction_turning']) \
+        and np.isnan(empty_m['soam']) and empty_m['n_junctions'] == 0, \
+        "An empty vessel should report NaN turning/soam and n_junctions == 0."
+    print("OK: empty vessel reports NaN total_turning/junction_turning/soam and n_junctions == 0.")

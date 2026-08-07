@@ -132,7 +132,7 @@ def run_batch(endpoint_csv_path, nifti_root, output_root, results_csv_path):
             point = (float(row['x']), float(row['y']), float(row['z']))
             try:
                 result = path_to_point(G, node_radius_map, segments, edge_to_seg, point)
-                agg = aggregate_path_metrics(result)
+                agg = aggregate_path_metrics(result, G=G)
                 rows.append({
                     'subject_id': subject_id,
                     'vessel_name': vessel_name,
