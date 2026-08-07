@@ -62,6 +62,41 @@ For detailed configuration options and advanced usage, see the [Usage Guide](doc
 
 ---
 
+## 🫀 Coronary Extension
+
+On top of the unmodified CaravelMetrics baseline above (built for cerebrovascular/brain analysis), this repository adds a separate, additive `coronary_extension/` package for coronary artery segment and vessel analysis. None of the baseline modules are modified to build it: `Graph_extractor.extract_graph` is reused as-is, and only `Segment_extractor.build_segments`, `Metric_extractor.compute_tortuosity_metrics` and `Graph_extractor.SLICER_MATRIX` are imported and called.
+
+### What it adds
+
+- **`coronary_extension/Segment_extractor.py`** — an alternative, bifurcation-based segment definition: instead of the baseline's root→endpoint shortest paths (which can overlap), a segment here is a maximal chain of nodes between two topological nodes (degree ≠ 2), so every edge of the graph belongs to exactly one segment. `build_segments_merged` additionally merges away degenerate (<4-node) segments so short skeletonization artifacts don't fragment a genuine vessel.
+- **`coronary_extension/Path_analyzer.py`** — answers "what is the path from the coronary ostium to this 3D point?", as an ordered chain of elementary segments with metrics. Lets a vessel of interest be defined by picking one endpoint (e.g. in 3D Slicer) instead of needing a full segmentation mask.
+- **`coronary_extension/Vessel_aggregator.py`** — reassembles elementary segments into whole endpoint-to-endpoint vessels (from a voxel mask via `metrics_per_label`, or from a path query via `aggregate_path_metrics`) and computes vessel-level tortuosity metrics:
+  - `arc_over_chord`, `spline_arc_length`/`spline_chord_length`, `fit_rmse` — from a single spline fit on the whole reconstructed vessel path.
+  - `mean_curvature` / `mean_square_curvature` / `rms_curvature` — a length-weighted aggregation of each elementary segment's own spline fit, which avoids the curvature spike a single whole-path spline would otherwise show at internal bifurcation-joint nodes.
+  - `total_turning`, `junction_turning`, `n_junctions`, `soam` (Sum-Of-Angles Metric, rad/mm) — a junction-aware turning measure that additionally recovers the turn angle concentrated exactly at a bifurcation node, which is invisible to the length-weighted curvature aggregation above (a junction node is only ever a segment endpoint, never one of its interior spline samples).
+  - Automatic pruning of short, spurious dead-end branches (`MIN_BRANCH_LENGTH_MM`) so a mask that is anatomically a single vessel isn't mistakenly flagged as a branching tree.
+- **`coronary_extension/Segment_visualizer.py`** — exports segments (with their metrics as cell arrays) to a colored `.vtp` file for inspection in 3D Slicer / ParaView.
+- **`Batch_runner.py`** (repo root) — batch entry point: given a CSV of `(subject_id, vessel_name, x, y, z)` ostium/endpoint coordinates, runs the path-based aggregation for every row and writes one results CSV.
+- **`run_demo.py`** (repo root) — end-to-end, single-subject demo exercising the whole additive pipeline (segment extraction, path query, mask-based aggregation, VTP export).
+
+### Running the coronary demo
+
+```bash
+# Single-subject, end-to-end demo
+python run_demo.py
+
+# Batch mode over a CSV of ostium/endpoint coordinates
+python Batch_runner.py data_test/endpoints_test.csv
+```
+
+### Minor fixes to the baseline
+
+- `Graph_extractor.py`: documented the RAS+ → LPS+ (`SLICER_MATRIX`) coordinate-frame conversion applied to node positions, and which downstream code needs to invert it.
+- `Metric_extractor.py`: replaced a bare `except:` in the atlas lookup with `except Exception`, chaining the raised error with `from e` so the original traceback is preserved.
+- `CaravelMetrics.py`: added per-stage timing metrics and logging, and an option to save the skeleton mask as output.
+
+---
+
 ## 📚 Documentation
 
 **Full documentation and usage examples are available in [`docs/`](docs/)**
