@@ -26,10 +26,26 @@ def main():
     parser.add_argument("--template", default=None, help="Path to custom MNI T1 template (optional).")
     parser.add_argument("--parcellation", default=None, help="Path to custom MNI parcellation (optional).")
     parser.add_argument("--label_map", default=None, help="Path to ArterialAtlasLables.txt for regional naming (optional).")
+    parser.add_argument("--no_atlas", action="store_true",
+                        help="Skip atlas registration entirely. Graph extraction and metric "
+                             "computation still run, but without regional/atlas-based metrics.")
     
     # Preprocessing flags
     parser.add_argument("--denoise", action="store_true", help="Apply ANTs DenoiseImage to the MRA.")
     parser.add_argument("--debias", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the MRA.")
+    parser.add_argument("--t1_debias", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the T1.")
+
+    # Skip skull-stripping if inputs are already stripped
+    parser.add_argument("--mra_stripped", action="store_true", help="Flag if the input MRA is already skull-stripped.")
+    parser.add_argument("--t1_stripped", action="store_true", help="Flag if the input T1 is already skull-stripped.")
+
+    # QC reporting
+    parser.add_argument("--qc", action="store_true",
+                        help="Also write an interactive HTML QC report for the extracted graph.")
+    parser.add_argument("--qc_dir", default=None,
+                        help="Where to write the QC report (default: the subject's own output folder).")
+    parser.add_argument("--registration_qc", action="store_true",
+                        help="Also write a PNG snapshot of the registered atlas labels for QC.")
     
     args = parser.parse_args()
 
@@ -39,11 +55,12 @@ def main():
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     DEFAULT_ATLAS_DIR = os.path.join(SCRIPT_DIR, "Atlas")
 
-    if args.parcellation is None:
-        args.parcellation = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlas.nii.gz")
-        
-    if args.label_map is None:
-        args.label_map = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlasLables.txt")
+    if not args.no_atlas:
+        if args.parcellation is None:
+            args.parcellation = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlas.nii.gz")
+
+        if args.label_map is None:
+            args.label_map = os.path.join(DEFAULT_ATLAS_DIR, "ArterialAtlasLables.txt")
         
     # Note: args.template is deliberately left as None if omitted. 
     # This allows Atlas_Registration.py to use its smart Brain/Whole head routing.
@@ -68,32 +85,41 @@ def main():
     logger.info("="*60)
     logger.info(f"STARTING CARAVEL PIPELINE FOR: {patient_name}")
     logger.info(f"Output directory: {subject_out_dir}")
-    logger.info("--- ATLAS CONFIGURATION ---")
-    logger.info(f"Parcellation: {args.parcellation}")
-    logger.info(f"Label Map:    {args.label_map}")
-    logger.info(f"Template:     {args.template if args.template else 'Default Smart Routing (Brain/Whole)'}")
+    if args.no_atlas:
+        logger.info("--- ATLAS CONFIGURATION: DISABLED (--no_atlas) ---")
+    else:
+        logger.info("--- ATLAS CONFIGURATION ---")
+        logger.info(f"Parcellation: {args.parcellation}")
+        logger.info(f"Label Map:    {args.label_map}")
+        logger.info(f"Template:     {args.template if args.template else 'Default Smart Routing (Brain/Whole)'}")
     logger.info("="*60)
-    
+
     # ---------------------------------------------------------
-    # STEP 1: ATLAS REGISTRATION
+    # STEP 1: ATLAS REGISTRATION (optional)
     # ---------------------------------------------------------
-    logger.info("--- STEP 1: ATLAS REGISTRATION ---")
     registered_atlas_path = None
-    try:
-        # process_registration only exposes a single combined MRA-preprocessing
-        # toggle (denoise+debias together), so either flag enables both.
-        registered_atlas_path, inv_matrix_path = process_registration(
-            image_path=args.image,
-            output_dir=subject_out_dir,
-            mni_parcellation=args.parcellation,
-            mni_t1_template=args.template,
-            image_t1_path=args.t1,
-            preprocess_mra=(args.denoise or args.debias)
-        )
-        logger.info(f"Registration complete. Registered atlas saved to: {registered_atlas_path}")
-    except Exception as e:
-        logger.error(f"Pipeline failed during registration: {str(e)}")
-        return
+    if args.no_atlas:
+        logger.info("--- STEP 1: ATLAS REGISTRATION SKIPPED (--no_atlas) ---")
+    else:
+        logger.info("--- STEP 1: ATLAS REGISTRATION ---")
+        try:
+            registered_atlas_path, inv_matrix_path = process_registration(
+                image_path=args.image,
+                output_dir=subject_out_dir,
+                mni_parcellation=args.parcellation,
+                mni_t1_template=args.template,
+                image_t1_path=args.t1,
+                denoise_mra=args.denoise,
+                debias_mra=args.debias,
+                preprocess_t1=args.t1_debias,
+                mra_stripped=args.mra_stripped,
+                t1_stripped=args.t1_stripped,
+                generate_qc=args.registration_qc,
+            )
+            logger.info(f"Registration complete. Registered atlas saved to: {registered_atlas_path}")
+        except Exception as e:
+            logger.error(f"Pipeline failed during registration: {str(e)}")
+            return
 
     # ---------------------------------------------------------
     # STEP 2: GRAPH EXTRACTION
@@ -119,7 +145,7 @@ def main():
             'fractal_dimension', 'lacunarity', 'geodesic_length', 'avg_diameter',
             'spline_arc_length', 'spline_chord_length', 'spline_mean_curvature',
             'spline_mean_square_curvature', 'spline_rms_curvature', 'arc_over_chord',
-            'fit_rmse', 'num_loops', 'num_abnormal_degree_nodes'
+            'num_loops', 'num_abnormal_degree_nodes'
         ]
         
         extract_metrics(
@@ -134,6 +160,28 @@ def main():
     except Exception as e:
         logger.error(f"Pipeline failed during metric computation: {str(e)}")
         return
+
+    # ---------------------------------------------------------
+    # STEP 4: QC REPORT (optional)
+    # ---------------------------------------------------------
+    if args.qc:
+        logger.info("--- STEP 4: QC REPORT ---")
+        # Imported here rather than at module scope so the pipeline still runs
+        # for anyone without plotly installed, as long as they don't ask for QC.
+        try:
+            from QC_report import generate_qc_report
+            qc_dir = args.qc_dir or subject_out_dir
+            html_path, _ = generate_qc_report(
+                graph_pkl_path=graph_pkl_path,
+                output_dir=qc_dir,
+                mask_path=args.mask,
+                atlas_path=registered_atlas_path,
+                label_map_path=args.label_map,
+            )
+            logger.info(f"QC report written to: {html_path}")
+        except Exception as e:
+            # A failed report must not invalidate the metrics already written.
+            logger.error(f"QC report generation failed (metrics are unaffected): {str(e)}")
 
     logger.info("="*60)
     logger.info("PIPELINE FINISHED SUCCESSFULLY.")

@@ -1,289 +1,286 @@
 ## 💻 Usage
 
-CaravelMetrics is implemented as a batch processing pipeline that processes vessel segmentation masks and extracts features across multiple subjects.
+**Contents:** [About](#about) · [Install](#install) · [Running the full pipeline](#running-the-full-pipeline) ·
+[Output](#output) · [Running individual stages](#running-individual-stages) · [Batch processing](#batch-processing) ·
+[QC reports](#qc-reports) · [Testing](#running-the-test-suite)
 
-### Mode Selection
+---
 
-Choose your analysis mode based on your needs:
+## About
 
-| Mode | Files Needed | FSL Required | Use Case |
-|------|--------------|--------------|----------|
-| **Whole-Brain** | Image folder + Mask folder | ❌ No | Quick screening, global metrics |
-| **Atlas-Based** | Image folder + Mask folder + T1 folder + Atlas | ✅ Yes | Regional analysis, territory comparison |
+CaravelMetrics was built to analyze the **brain** cerebrovascular network: starting from a TOF-MRA
+angiography image and its vessel segmentation mask, it registers an arterial atlas (30 territories,
+Liu et al. 2023) to get territory-level metrics on top of whole-graph ones. That's the pipeline
+described in [Running the full pipeline](#running-the-full-pipeline) below, and the default atlas
+bundled in `Atlas/` is brain-specific.
 
-### Configuration
+Underneath, though, graph extraction and metric computation don't know anything about brains --
+they operate on any binary vessel mask, or any vessel graph, regardless of anatomy. So the same
+code has also been used on other vascular structures (e.g. coronary arteries) by skipping
+registration entirely -- either by passing `--no_atlas` to `CaravelMetrics.py`, or by starting
+directly from a mask or a pre-built graph, see [Running individual stages](#running-individual-stages).
 
-CaravelMetrics uses a configuration-based approach. Edit the following variables in `CaravelMetrics.py`:
+---
 
-```python
-# Set paths to your data folders
-segmentation_folder = 'path/to/vessel_masks'  # Folder containing vessel segmentation masks
-image_folder = 'path/to/vessel_images'        # Folder containing vessel images (e.g., TOF-MRA)
-t1_image_folder = 'path/to/T1_images'         # Folder containing T1 images (atlas mode only)
-
-# Atlas configuration (for regional analysis)
-atlas_path = 'ArterialAtlas.nii.gz'           # Path to arterial atlas file
-label_map_path = 'ArterialAtlas_labels.txt'   # Path to atlas label definitions
-
-# Output configuration
-output_base_folder = 'Results/'                # Base folder for all results
-
-# Analysis mode
-use_atlas = False  # Set to True for atlas-based regional analysis, False for whole-brain
-
-# Processing configuration
-skip_existing = False     # Set to True to skip already processed files
-run_parallel = True       # Set to True to use parallel processing
-num_workers = None        # Number of parallel workers (None = auto-detect)
-chunk_size = 1           # Chunk size for parallel processing
-
-# Metric selection
-selected_metrics = ['total_length', 'num_bifurcations', 'bifurcation_density', 
-                   'volume', 'fractal_dimension', 'lacunarity', ...]
-```
-
-### Running the Pipeline
-
-#### 1. Configure Your Settings
-
-Edit `CaravelMetrics.py` to set your data paths and analysis parameters:
-
-```python
-# Example configuration for whole-brain analysis
-segmentation_folder = '/data/vessel_segmentations'
-image_folder = '/data/TOF_MRA_images'
-output_base_folder = 'Results_WholeBrain/'
-use_atlas = False
-run_parallel = True
-```
-
-#### 2. Run the Pipeline
+## Install
 
 ```bash
-python CaravelMetrics.py
+git clone https://github.com/i-vesseg/CaravelMetrics.git
+cd CaravelMetrics
+pip install -r requirements.txt
 ```
 
-The pipeline will automatically:
-- Discover all `.nii`, `.nii.gz` files in the segmentation folder
-- Process each file (optionally in parallel)
-- Generate results in the output folder
-- Create a log file (`processing.log`) with detailed execution information
+FSL (`flirt`, `bet`, `robustfov`, `fslreorient2std`, `convert_xfm`, `fslmaths`) must be installed
+and on `PATH` separately -- see [INSTALLATION.md](INSTALLATION.md) -- but only if you register to
+an atlas. Graph extraction and whole-graph metrics don't need it.
 
-### Example Configurations
+---
 
-#### 1. Whole-Brain Analysis (Fast Screening)
+## Running the full pipeline
+
+`CaravelMetrics.py` is the single-command entry point: given a subject's MRA + vessel mask (+
+optional T1), it runs registration, graph extraction, and metric computation in one call --
+or skips registration with `--no_atlas`, see [below](#without-atlas-whole-graph-only).
+
+### With atlas (regional analysis)
+
+```bash
+python CaravelMetrics.py \
+  --image  subject001_MRA.nii.gz \
+  --mask   subject001_vessel_mask.nii.gz \
+  --t1     subject001_T1.nii.gz \
+  --mra_stripped --t1_stripped \
+  --output_dir results/ \
+  --qc
+```
+
+If your T1/MRA aren't already skull-stripped, drop `--mra_stripped`/`--t1_stripped` (BET +
+`robustfov` run automatically). If you have no T1 at all, drop `--t1`: registration falls back to
+warping the MNI template directly onto the MRA. Preprocessing flags (`--denoise`, `--debias`,
+`--t1_debias`) and `--registration_qc` (a PNG snapshot of the registered labels, separate from
+`--qc`'s HTML graph report) are optional -- run `python CaravelMetrics.py --help` for the full list.
+
+### Without atlas (whole-graph only)
+
+Pass `--no_atlas` to skip registration -- and the FSL dependency it requires -- while still
+running graph extraction and metric computation in one call:
+
+```bash
+python CaravelMetrics.py \
+  --image  subject001_MRA.nii.gz \
+  --mask   subject001_vessel_mask.nii.gz \
+  --output_dir results/ \
+  --no_atlas
+```
+
+`--image` is still required (it's used to name the subject's output folder), but no MRA/atlas/T1
+arguments are read. Metrics land in a sibling `_GLOBAL` folder instead of the atlas layout -- see
+[Output](#output) below.
+
+You can also chain graph extraction and metric computation yourself, which is exactly what
+`--no_atlas` does internally, minus the registration step in front. This is the way to go if you
+don't have an MRA/reference image at all, or you're working from a mask produced elsewhere:
+
+```bash
+python Graph_extractor.py \
+  --mask subject001_vessel_mask.nii.gz \
+  --output_dir results/
+
+python Metric_extractor.py \
+  --graph results/subject001_vessel_mask_vessel_data.pkl \
+  --out_dir results/ \
+  --mask subject001_vessel_mask.nii.gz
+```
+
+---
+
+## Output
+
+**With atlas**, `results/subject001_MRA/` contains the registered/dilated atlas, the vessel graph
+(`.pkl` + `.vtp`), `subject001_MRA_global_summary.csv` (whole-graph metrics),
+`subject001_MRA_region_summary.csv` + `subject001_MRA_all_components_by_region.csv`
+(per-territory), plus (with `--qc`) an interactive QC report -- every file is prefixed with the
+subject name, so nothing collides if you ever gather several subjects' folders into one place:
+
+```
+results/
+└── subject001_MRA/
+    ├── subject001_MRA_vessel_data.pkl                        # graph: networkx + per-node radius
+    ├── subject001_MRA_vessel_graph.vtp                       # ParaView / ITK-SNAP
+    ├── subject001_MRA_vessel_graph_slicer.vtp                # 3D Slicer (LPS/RAS flip applied)
+    ├── subject001_MRA_registered_parcellation_dilated.nii.gz
+    ├── subject001_MRA_global_summary.csv                     # whole-graph metrics
+    ├── subject001_MRA_region_summary.csv                     # per-territory aggregated metrics
+    ├── subject001_MRA_all_components_by_region.csv           # per-connected-component metrics
+    ├── subject001_MRA_QC.html                                # QC report (with --qc)
+    ├── regional_vtps/                                        # one VTP per atlas territory
+    ├── regional_results/                                     # per-region, per-component detail + segment CSVs
+    └── processing.log
+```
+
+The QC report defaults into the subject's own folder alongside everything else; pass `--qc_dir` to
+put it somewhere else instead (e.g. a shared `QC/` folder across subjects for a batch run).
+
+**Without atlas** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain),
+there's no per-territory breakdown and no `global_summary.csv` -- metrics go to a sibling
+`<output_folder>_GLOBAL/` directory as `region_summary.csv` (with a single `global` pseudo-region)
++ `all_components_by_region.csv`, both still prefixed with the subject name. This "GLOBAL" split is
+`extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies the same
+way whether you ran `CaravelMetrics.py --no_atlas` or the individual stages yourself. E.g.
+`CaravelMetrics.py --no_atlas --output_dir results/ --image subject001_MRA.nii.gz ...` writes the
+vessel graph (and QC report, with `--qc`) to `results/subject001_MRA/` but metrics to
+`results_GLOBAL/subject001_MRA/`.
+
+---
+
+## Running individual stages
+
+Each stage -- registration, graph extraction, metric computation -- can be called on its own, both
+as a CLI and as a plain Python function. This is how the pipeline extends beyond brain MRA: if you
+already have a mask, or already have a graph, you don't need registration or graph extraction at
+all, and nothing here is brain-specific.
+
+### Already have a mask
+
+Same as [Without atlas](#without-atlas-whole-graph-only) above: run `Graph_extractor.py` then
+`Metric_extractor.py` directly. Works for any binary vessel mask, any anatomy or modality (TOF-MRA,
+CTA, ...) -- registration and the arterial atlas are brain/MRA-specific, but graph extraction and
+metrics are not.
+
+### Already have a graph
+
+Skip graph extraction too. `Metric_extractor.extract_metrics` doesn't require a mask if you already
+have a vessel graph -- `robust_graph_loader` auto-detects Caravel's own pickle format, a raw
+NetworkX graph, a UNC Skwerer/Bullitt tree dictionary, or a MetaIO/TubeTK `.tre` scene, so any of
+these work as `--graph`/`graph_pkl_path` directly. This is the path for structures from other
+vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
+
+```bash
+python Metric_extractor.py --graph my_vessel_tree.pkl --out_dir results/
+python Metric_extractor.py --graph my_vessel_tree.tre --out_dir results/
+```
 
 ```python
-# CaravelMetrics.py configuration
-segmentation_folder = 'data/segmentations/'
-image_folder = 'data/TOF_images/'
-output_base_folder = 'Results_WholeBrain/'
+from Metric_extractor import extract_metrics
 
-use_atlas = False  # Whole-brain mode
-run_parallel = True
-num_workers = 4
-skip_existing = False
-
-selected_metrics = ['total_length', 'volume', 'bifurcation_density', 
-                   'fractal_dimension', 'num_loops']
+extract_metrics(
+    output_folder="results/",
+    graph_pkl_path="my_vessel_tree.tre",
+    selected_metrics=["total_length", "num_bifurcations", "spline_mean_curvature", "num_loops"],
+)
 ```
 
-#### 2. Atlas-Based Regional Analysis (Detailed)
+### Registration only
 
-```python
-# CaravelMetrics.py configuration
-segmentation_folder = 'data/segmentations/'
-image_folder = 'data/TOF_images/'
-t1_image_folder = 'data/T1_images/'
+Useful for pre-computing atlases for a cohort ahead of a batch graph/metrics run.
 
-atlas_path = 'atlases/ArterialAtlas.nii.gz'
-label_map_path = 'atlases/ArterialAtlas_labels.txt'
-output_base_folder = 'Results_Regional/'
-
-use_atlas = True  # Atlas-based regional mode
-run_parallel = True
-num_workers = 2  # Use fewer workers for atlas mode (more memory intensive)
-skip_existing = False
-
-selected_metrics = ['total_length', 'spline_mean_curvature', 
-                   'fractal_dimension', 'bifurcation_density']
+```bash
+python Atlas_Registration.py \
+  --image subject001_MRA.nii.gz \
+  --t1    subject001_T1.nii.gz \
+  --mra_stripped --t1_stripped \
+  --output_dir results/registration/
 ```
-
-#### 3. Resume Interrupted Processing
-
-```python
-# Skip files that have already been processed
-skip_existing = True  # Set to True
-run_parallel = True
-# Processed files are skipped automatically
-```
-
-#### 4. Sequential Processing for Debugging
-
-```python
-# Disable parallel processing to see detailed error messages
-run_parallel = False  # Sequential processing
-skip_existing = False
-```
-
-### Advanced Usage: Direct Script Access
-
-For single-subject processing or custom workflows, you can use the underlying scripts directly:
 
 ```python
 from Atlas_Registration import process_registration
+
+registered_atlas_path, inv_matrix_path = process_registration(
+    image_path="subject001_MRA.nii.gz",
+    output_dir="results/registration/",
+    image_t1_path="subject001_T1.nii.gz",
+    mra_stripped=True,
+    t1_stripped=True,
+)
+```
+
+---
+
+## Batch processing
+
+There's no built-in batch runner (each subject's data layout tends to differ), but the pattern is
+short -- parallelize with `ProcessPoolExecutor` over subjects, reusing `extract_graph`'s built-in
+skip-if-already-processed check to make reruns cheap:
+
+```python
+import glob
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
 from Graph_extractor import extract_graph
 from Metric_extractor import extract_metrics
 
-# Step 1: Register atlas (atlas mode only)
-process_registration(
-    image_path='sub001_TOF.nii.gz',
-    t1_image_path='sub001_T1.nii.gz',
-    mask_path='sub001_mask.nii.gz',
-    atlas_path='ArterialAtlas.nii.gz',
-    output_folder='output/sub001/'
-)
+MASK_DIR, OUTPUT_DIR = "data/masks", "results/cohort"
+METRICS = ["total_length", "volume", "num_bifurcations", "bifurcation_density", "num_loops"]
 
-# Step 2: Extract vessel graph
-extract_graph(
-    nifti_path='sub001_mask.nii.gz',
-    output_folder='output/sub001/'
-)
+def process_subject(mask_path):
+    subject_id = Path(mask_path).name.split(".")[0]
+    out_dir = Path(OUTPUT_DIR, subject_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    graph_pkl = extract_graph(nifti_path=mask_path, output_folder=str(out_dir))
+    extract_metrics(output_folder=str(out_dir), graph_pkl_path=graph_pkl,
+                     selected_metrics=METRICS, mask_path=mask_path)
 
-# Step 3: Compute metrics
-extract_metrics(
-    patient_name='sub001',
-    output_folder='output/sub001/',
-    graph_pkl_path='output/sub001/vessel_data.pkl',
-    selected_metrics=['total_length', 'volume', 'fractal_dimension'],
-    label_map_path='ArterialAtlas_labels.txt',
-    registered_atlas_path='output/sub001/sub001_T1_registered_atlas.nii.gz'  # None for whole-brain
+if __name__ == "__main__":
+    masks = glob.glob(f"{MASK_DIR}/*.nii.gz")
+    with ProcessPoolExecutor(max_workers=4) as ex:
+        list(ex.map(process_subject, masks))
+```
+
+For atlas-based batch runs, register each subject first (this is the slow, FSL-dependent step) and
+reuse the registered atlas path across reruns the same way.
+
+---
+
+## QC reports
+
+Two independent QC outputs, either usable standalone:
+
+- **Registration QC** (`Atlas_Registration.generate_qc_snapshot`, or `--qc`/`--registration_qc` on
+  the CLIs above): a static PNG grid of sagittal/coronal/axial slices with the registered atlas
+  contoured on top of the MRA.
+- **Graph QC** (`QC_report.generate_qc_report`, or `--qc` on `CaravelMetrics.py`): an interactive
+  HTML report (3D graph viewer, per-component/per-region metric tables) built directly from a
+  `vessel_data.pkl`:
+
+```python
+from QC_report import generate_qc_report
+
+generate_qc_report(
+    graph_pkl_path="results/subject001_vessel_mask_vessel_data.pkl",
+    output_dir="results/QC/",
+    mask_path="subject001_vessel_mask.nii.gz",
 )
 ```
 
 ---
 
-## 📁 Input Data Requirements
+## Running the test suite
 
-### Data Organization
+The repo ships a small pytest smoke-test suite with its own bundled sample data (not meant as
+usage examples -- see [tests/test_pipeline.py](../tests/test_pipeline.py)) that exercises the full
+pipeline end-to-end, including the brain full-pipeline flow, whole-graph-only on non-brain masks,
+and metrics-only on external graph formats:
 
-Organize your data into separate folders:
-
-```
-project/
-├── segmentations/          # Vessel segmentation masks
-│   ├── sub001_MRA.nii.gz
-│   ├── sub002_MRA.nii.gz
-│   └── ...
-├── TOF_images/             # Original vessel images
-│   ├── sub001_MRA.nii.gz
-│   ├── sub002_MRA.nii.gz
-│   └── ...
-├── T1_images/              # T1-weighted images (atlas mode only)
-│   ├── sub001_T1.nii.gz
-│   ├── sub002_T1.nii.gz
-│   └── ...
-└── atlases/
-    ├── ArterialAtlas.nii.gz
-    └── ArterialAtlas_labels.txt
+```bash
+pip install pytest
+pytest tests/ -v
 ```
 
-**Important**: File names must be consistent across folders. The pipeline matches files by name (after removing extensions).
-
-### Vessel Segmentation Masks
-- **Format**: NIfTI (.nii or .nii.gz)
-- **Type**: Binary masks (1 = vessel, 0 = background)
-- **Source**: TOF-MRA, CTA, or other angiographic modalities
-- **Preprocessing**: Should be skull-stripped
-
-### Vessel Images
-- **Format**: NIfTI (.nii or .nii.gz)
-- **Type**: Raw TOF-MRA or CTA images
-- **Naming**: Must match corresponding mask files
-
-### T1-Weighted Images (Atlas-Based Mode Only)
-- **Format**: NIfTI (.nii or .nii.gz)
-- **Purpose**: Intermediate registration step for atlas alignment
-- **Requirements**: Must correspond to the same subject as the vessel image
-- **Naming**: File name should contain 'T1' and subject ID
-
-### Arterial Atlas (Atlas-Based Mode Only)
-- **Format**: NIfTI (.nii or .nii.gz)
-- **Type**: Integer-labeled regions (1-30 for 30 territories)
-- **Recommended**: Liu et al. 2023 Digital 3D Brain MRI Arterial Territories Atlas
-- **Label Map**: Text file with format: `<label_id> <region_name>`
-- **Note**: Atlas labels must be integers; label 0 is treated as background
+Results are written to `tests/output/` (gitignored) so you can inspect them after the run.
 
 ---
 
-## 📊 Output Structure
+## Reference: input data requirements
 
-After processing, the output folder contains:
-
-### Whole-Brain Mode Output
-```
-Results/
-├── sub001/
-│   ├── vessel_data.pkl                    # Serialized graph structure
-│   ├── vessel_graph.vtp                   # VTK visualization file
-│   ├── Region_1/                          # Whole-brain results
-│   │   ├── Conn_comp_1/                   # Largest connected component
-│   │   │   ├── Conn_comp_1_skeleton.nii.gz
-│   │   │   └── Segments/                  # Vessel segments (optional)
-│   │   ├── Conn_comp_2/                   # Second largest component
-│   │   └── ...
-│   └── processing.log                     # Execution log
-├── sub001_GLOBAL/
-│   ├── all_components_by_region.csv       # Detailed component metrics
-│   └── region_summary.csv                 # Aggregated metrics
-└── sub002/
-    └── ...
-```
-
-### Atlas-Based Mode Output
-```
-Results/
-├── sub001/
-│   ├── vessel_data.pkl                    # Serialized graph structure
-│   ├── vessel_graph.vtp                   # VTK visualization file
-│   ├── sub001_T1_registered_atlas.nii.gz  # Atlas registered to TOF space
-│   ├── sub001_T1_brain.nii.gz             # Skull-stripped T1
-│   ├── sub001_T1_cropped.nii.gz           # Cropped T1
-│   ├── sub001_T1_in_MRA.nii.gz            # T1 registered to MRA space
-│   ├── Region_1/                          # First atlas region
-│   │   ├── Conn_comp_1/
-│   │   │   ├── Conn_comp_1_skeleton.nii.gz
-│   │   │   └── Segments/
-│   │   ├── Conn_comp_2/
-│   │   └── ...
-│   ├── Region_2/                          # Second atlas region
-│   │   └── ...
-│   ├── all_components_by_region.csv       # Detailed component metrics per region
-│   ├── region_summary.csv                 # Aggregated metrics per region
-│   └── processing.log                     # Execution log
-└── sub002/
-    └── ...
-```
-
-### CSV Output Format
-
-**all_components_by_region.csv** - Detailed metrics for each connected component:
-```csv
-region_label,total_length,volume,num_bifurcations,bifurcation_density,fractal_dimension,lacunarity,...
-1,2543.21,1234.56,45,0.0177,1.67,0.42,...
-1,876.43,342.12,12,0.0137,1.54,0.38,...
-2,1543.87,892.34,32,0.0208,1.71,0.45,...
-...
-```
-
-**region_summary.csv** - Aggregated metrics per region:
-```csv
-region_label,num_components,total_length,volume,num_bifurcations,...
-1,15,45234.5,12456.8,234,...
-2,12,38765.2,10234.5,189,...
-...
-```
-
-**Note**: In whole-brain mode, all results are aggregated under `region_label = 1`.
-
----
+- **Vessel mask** (required): binary NIfTI (1 = vessel, 0 = background), any modality (TOF-MRA,
+  CTA, ...), any anatomy.
+- **MRA/reference image**: the intensity image the mask was segmented from. Needed for
+  registration; `CaravelMetrics.py` still requires `--image` even with `--no_atlas` (it names the
+  subject's output folder), but `Graph_extractor.py`/`Metric_extractor.py` run without it.
+- **T1 image** (optional, atlas mode): improves registration accuracy via an
+  MNI-T1-to-subject-T1-to-subject-MRA chain instead of registering the MNI template directly to
+  the MRA. Omit it and registration still works.
+- **Arterial atlas + label map** (optional, atlas mode): defaults to the bundled
+  `Atlas/ArterialAtlas.nii.gz` (Liu et al. 2023, 30 territories) and
+  `Atlas/ArterialAtlasLables.txt`; pass `--parcellation`/`--label_map` (or
+  `mni_parcellation`/`label_map_path`) for a different atlas.

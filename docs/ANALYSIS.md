@@ -1,6 +1,9 @@
 ## 📊 Statistical Analysis
 
-For population-level analysis, we provide a comprehensive Jupyter notebook (`CaravelMetrics_Stats_Analysis_IXI.ipynb`) that includes:
+Population-level analysis (age/sex trends, site effects, regional patterns) is left to you, using
+whatever notebook or script fits your study -- the pipeline's output (per-subject CSVs) is plain
+tabular data, not tied to any particular analysis tool. The snippets below show the shape of that
+kind of analysis:
 
 ### Analysis Modules
 
@@ -38,12 +41,9 @@ for subject_id in subject_list:
 
 combined_df = pd.concat(results, ignore_index=True)
 
-# Merge with demographic data
-metadata = pd.read_excel('IXI_METADATA.xls')
+# Merge with your own demographic/cohort metadata
+metadata = pd.read_csv('metadata.csv')
 analysis_df = combined_df.merge(metadata, on='subject_id')
-
-# Run analyses using the provided notebook
-# See CaravelMetrics_Stats_Analysis_IXI.ipynb for complete examples
 ```
 
 ### FDR Correction

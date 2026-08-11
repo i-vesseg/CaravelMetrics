@@ -1,7 +1,8 @@
 # Output folders
 Results*/
 IXI*/
-tests*/
+tests/output*/
+test*/
 
 # Random files
 IXI.csv

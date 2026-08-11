@@ -13,6 +13,7 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 from scipy.interpolate import splprep, splev, interp1d
+from scipy.spatial import cKDTree
 from sklearn.linear_model import LinearRegression
 import pickle
 import SimpleITK as sitk
@@ -40,20 +41,19 @@ def load_label_map(txt_path):
 def compute_tortuosity_metrics(points, smoothing=0, n_samples=500, counts=None):
     pts = np.asarray(points)
     
-    # --- FIX: Filter out consecutive duplicate points that crash splprep ---
+    # Consecutive duplicate points crash splprep; drop them (keep the first).
     if pts.shape[0] > 1:
         diffs = np.linalg.norm(np.diff(pts, axis=0), axis=1)
-        valid_idx = np.insert(diffs > 1e-6, 0, True) # Keep the first point, drop duplicates
+        valid_idx = np.insert(diffs > 1e-6, 0, True)
         pts = pts[valid_idx]
         if counts is not None:
             counts = np.asarray(counts)[valid_idx]
-    # ---------------------------------------------------------------------
 
     if pts.shape[0] < 4:
         nan_dict = {k: np.nan for k in [
             'spline_arc_length','spline_chord_length',
             'spline_mean_curvature','spline_mean_square_curvature',
-            'spline_rms_curvature','arc_over_chord','fit_rmse']}
+            'spline_rms_curvature','arc_over_chord']}
         return nan_dict
 
     tck, u = splprep(pts.T, s=smoothing)
@@ -101,8 +101,9 @@ def compute_tortuosity_metrics(points, smoothing=0, n_samples=500, counts=None):
     rms_curv        = np.sqrt(mean_sq_curv)
 
     chord_len = np.linalg.norm(pts_u[-1] - pts_u[0])
-    spline_at_u = np.array(splev(u, tck)).T
-    fit_rmse    = np.sqrt(np.mean(np.sum((spline_at_u - pts)**2, axis=1)))
+    # 'fit_rmse' (spline vs input points) is deliberately not reported: with
+    # s=0 (exact interpolation, used throughout) it is ~1e-14 everywhere --
+    # floating-point noise, not a meaningful fit-quality column.
 
     return {
         'spline_arc_length':           arc_len,
@@ -111,7 +112,6 @@ def compute_tortuosity_metrics(points, smoothing=0, n_samples=500, counts=None):
         'spline_mean_square_curvature':mean_sq_curv,
         'spline_rms_curvature':        rms_curv,
         'arc_over_chord':              (arc_len / chord_len) if chord_len>0 else np.inf,
-        'fit_rmse':                    fit_rmse
     }
 
 def compute_fractal_dimension(points, box_sizes=None):
@@ -192,7 +192,13 @@ def extract_segments_from_component_using_shortest_path(G_comp, distance_map):
         counts = defaultdict(int)
         for ep in endpoints:
             if ep == root: continue
-            try: path = nx.shortest_path(G_comp, source=root, target=ep)
+            # weight='weight' matters: without it this is a hop-count BFS, so
+            # wherever a component contains a loop (and these graphs do -- the
+            # code reports num_loops explicitly) it can return a route that is
+            # not the physically shortest one, silently corrupting
+            # geodesic_length, avg_diameter and every spline metric derived
+            # from the path.
+            try: path = nx.shortest_path(G_comp, source=root, target=ep, weight='weight')
             except nx.NetworkXNoPath: continue
             segs.append(path)
             for node in path: counts[node] += 1
@@ -201,8 +207,9 @@ def extract_segments_from_component_using_shortest_path(G_comp, distance_map):
 
     return segment_lists, segment_counts_list
 
-def save_results(results, output_folder, save_segment_masks, save_conn_comp_masks, region_true_volumes=None):
+def save_results(results, output_folder, save_segment_masks, save_conn_comp_masks, region_true_volumes=None, patient_name=None):
     print("  Saving results...")
+    file_prefix = f"{patient_name}_" if patient_name else ""
     general_keys = [
         'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
         'fractal_dimension', 'lacunarity', 'num_loops', 'num_abnormal_degree_nodes'
@@ -264,7 +271,7 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
         df_detailed = pd.DataFrame(region_rows)
         df_detailed = df_detailed.drop(columns=['component_index', 'original_component_id'], errors='ignore')
         df_detailed = df_detailed.sort_values(by=['region_label', 'total_length'], ascending=[True, False])
-        df_detailed.to_csv(os.path.join(output_folder, 'all_components_by_region.csv'), index=False)
+        df_detailed.to_csv(os.path.join(output_folder, f'{file_prefix}all_components_by_region.csv'), index=False)
 
         summary_metrics = ['total_length', 'num_bifurcations', 'volume', 'num_loops', 'num_abnormal_degree_nodes']
         tortuosity_cols = [
@@ -291,9 +298,15 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
             total_len = group['total_length'].sum()
             for col in tortuosity_cols:
                 if col in group:
-                    values = group[col].fillna(0)
-                    weighted_avg = (values * group['total_length']).sum() / total_len if total_len > 0 else np.nan
-                    row[col] = weighted_avg
+                    # Exclude undefined values rather than zeroing them: a
+                    # component with no measurable curvature must drop out of
+                    # BOTH numerator and denominator. fillna(0) kept its full
+                    # length in the denominator while contributing nothing,
+                    # dragging the regional average toward zero.
+                    valid = group[col].notna()
+                    w = group['total_length'][valid]
+                    w_sum = w.sum()
+                    row[col] = ((group[col][valid] * w).sum() / w_sum) if w_sum > 0 else np.nan
                 else:
                     row[col] = np.nan
 
@@ -303,13 +316,42 @@ def save_results(results, output_folder, save_segment_masks, save_conn_comp_mask
 
         df_summary = pd.DataFrame(summary_rows)
         df_summary = df_summary.sort_values(by='region_label')
-        df_summary.to_csv(os.path.join(output_folder, 'region_summary.csv'), index=False)
+        df_summary.to_csv(os.path.join(output_folder, f'{file_prefix}region_summary.csv'), index=False)
 
     print(f"Results saved to: {output_folder}")
 
     
+def ensure_edge_weights(G):
+    """
+    Guarantee every edge carries a physical 'weight' (length in mm).
+
+    networkx silently substitutes 1 for a missing weight, which would
+    quietly turn total_length/volume/geodesic metrics into edge counts with
+    no warning. Graph_extractor always writes 'weight', but graphs loaded
+    from other sources (robust_graph_loader scenarios 1/2/4) may not.
+    Recomputes missing weights from node positions; raises if a graph has
+    neither weights nor positions to recompute them from.
+    """
+    missing = [(u, v) for u, v, d in G.edges(data=True) if 'weight' not in d]
+    if not missing:
+        return 0
+    if not all('pos' in G.nodes[n] for e in missing for n in e):
+        raise ValueError(
+            f"{len(missing)} edges lack a 'weight' attribute and their nodes "
+            "have no 'pos' to recompute it from; length/volume/geodesic "
+            "metrics cannot be computed for this graph."
+        )
+    for u, v in missing:
+        G[u][v]['weight'] = float(
+            np.linalg.norm(np.asarray(G.nodes[u]['pos']) - np.asarray(G.nodes[v]['pos']))
+        )
+    print(f"  ! {len(missing)} edges had no 'weight'; recomputed from node positions.")
+    return len(missing)
+
+
 def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
     results = {}
+    ensure_edge_weights(G)
     for cid, comp_nodes in enumerate(nx.connected_components(G)):
         Gc = G.subgraph(comp_nodes).copy()
         data = {}
@@ -324,11 +366,16 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
         if 'bifurcation_density' in selected_metrics: data['bifurcation_density'] = num_bif / total_len if total_len > 0 else np.nan
         
         if 'volume' in selected_metrics:
-            vol = 0.0    
+            # Conical frustum, not a mean-radius cylinder. The two differ by
+            # pi*l*(r_u - r_v)**2 / 12, which is always >= 0, so the old form
+            # systematically under-estimated volume wherever the radius
+            # changes along an edge -- i.e. at every taper and bifurcation.
+            vol = 0.0
             for u, v, d in Gc.edges(data=True):
                 l = d.get('weight', 0)
-                r = (node_radius_map.get(u, 0.5) + node_radius_map.get(v, 0.5)) / 2.0
-                vol += l * np.pi * (r ** 2) 
+                r_u = node_radius_map.get(u, 0.5)
+                r_v = node_radius_map.get(v, 0.5)
+                vol += np.pi * l * (r_u ** 2 + r_u * r_v + r_v ** 2) / 3.0
             data['volume'] = vol
         
         if 'fractal_dimension' in selected_metrics: data['fractal_dimension'] = compute_fractal_dimension(coords)
@@ -349,7 +396,15 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
             
             for r_idx, seg_list in enumerate(seg_lists):
                 seg_metrics = []
-                total_geo = 0.0
+                # Separate weight accumulator per metric. A segment with fewer
+                # than 4 points yields NaN curvature (routine for short
+                # terminal branches), and adding its length to a shared
+                # denominator while contributing nothing to the numerator
+                # biases the length-weighted average toward zero. Each metric
+                # therefore only accumulates the length of the segments that
+                # actually defined it.
+                len_curv = 0.0
+                len_curv2 = 0.0
                 sum_curv = 0.0
                 sum_curv2 = 0.0
 
@@ -358,7 +413,6 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
                     sm = {}
                     L_geo = sum(np.linalg.norm(pts[i] - pts[i+1]) for i in range(len(pts)-1))
                     sm['geodesic_length'] = L_geo
-                    total_geo += L_geo
 
                     if 'avg_diameter' in selected_metrics: sm['avg_diameter'] = np.mean([2 * node_radius_map.get(n, 0.5) for n in seg])
                         
@@ -368,20 +422,20 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
 
                     if 'spline_mean_curvature' in selected_metrics:
                         sm['spline_mean_curvature'] = tort['spline_mean_curvature']
-                        if not np.isnan(tort['spline_mean_curvature']): sum_curv += tort['spline_mean_curvature'] * L_geo
-                            
+                        if not np.isnan(tort['spline_mean_curvature']):
+                            sum_curv += tort['spline_mean_curvature'] * L_geo
+                            len_curv += L_geo
+
                     if 'spline_mean_square_curvature' in selected_metrics:
                         sm['spline_mean_square_curvature'] = tort['spline_mean_square_curvature']
-                        if not np.isnan(tort['spline_mean_square_curvature']): sum_curv2 += tort['spline_mean_square_curvature'] * L_geo
-                            
+                        if not np.isnan(tort['spline_mean_square_curvature']):
+                            sum_curv2 += tort['spline_mean_square_curvature'] * L_geo
+                            len_curv2 += L_geo
+
                     seg_metrics.append(sm)
 
-                if total_geo > 0:
-                    agg_curv.append(sum_curv/total_geo)
-                    agg_curv2.append(sum_curv2/total_geo)
-                else:
-                    agg_curv.append(np.nan)
-                    agg_curv2.append(np.nan)
+                agg_curv.append(sum_curv / len_curv if len_curv > 0 else np.nan)
+                agg_curv2.append(sum_curv2 / len_curv2 if len_curv2 > 0 else np.nan)
 
                 segments_info.append({'segment_metrics': seg_metrics})
 
@@ -394,15 +448,90 @@ def compute_metrics_for_mask(G, node_radius_map, selected_metrics):
     return results
 
 
+def _parse_tre_tubes(path):
+    """
+    Parse the point sequence of every 'Tube' object in a MetaIO/TubeTK .tre
+    scene file. Returns a list of (N, 4) arrays of [x, y, z, radius] per
+    tube, in file order. Only Tube point blocks are read; everything else
+    in the MetaIO format is ignored.
+    """
+    with open(path, 'r') as f:
+        lines = f.readlines()
+
+    tubes = []
+    i, n = 0, len(lines)
+    while i < n:
+        if lines[i].strip() == 'ObjectType = Tube':
+            npoints, j = None, i + 1
+            while j < n and not lines[j].strip().startswith('Points ='):
+                s = lines[j].strip()
+                if s.startswith('NPoints'):
+                    npoints = int(s.split('=')[1].strip())
+                j += 1
+            if npoints is None:
+                raise ValueError(f"{path}: Tube object with no NPoints (line {i + 1}).")
+            j += 1  # skip the 'Points =' line itself
+            pts = np.array([[float(v) for v in lines[j + k].split()[:4]] for k in range(npoints)])
+            tubes.append(pts)
+            i = j + npoints
+        else:
+            i += 1
+    return tubes
+
+
+def _load_tre_scene(path, stitch_tolerance_mm=2.0):
+    """
+    Build a Caravel-style graph from a MetaIO/TubeTK .tre scene: chains each
+    tube's points into a path, then stitches tubes together wherever an
+    endpoint lands within stitch_tolerance_mm of an already-placed point --
+    .tre ParentID only encodes group membership, not branch-to-branch
+    topology, so touching tubes have to be found geometrically. Tubes that
+    don't touch anything within tolerance stay as separate components, like
+    any other pipeline input with gaps in the underlying data.
+    """
+    tubes = _parse_tre_tubes(path)
+    G = nx.Graph()
+    node_radius_map = {}
+    all_pos = np.empty((0, 3))
+    node_id = 0
+
+    for tube in tubes:
+        tube_node_ids = list(range(node_id, node_id + len(tube)))
+        for (x, y, z, r), nid in zip(tube, tube_node_ids):
+            pos = np.array([x, y, z])
+            G.add_node(nid, pos=pos, radius=r)
+            node_radius_map[nid] = r
+        G.add_edges_from(zip(tube_node_ids[:-1], tube_node_ids[1:]))
+        node_id += len(tube)
+
+        tube_xyz = tube[:, :3]
+        if all_pos.shape[0] > 0:
+            tree = cKDTree(all_pos)
+            for end_idx in (0, -1):
+                dist, nearest = tree.query(tube_xyz[end_idx])
+                if dist < stitch_tolerance_mm:
+                    G.add_edge(tube_node_ids[end_idx], int(nearest))
+        all_pos = np.vstack([all_pos, tube_xyz])
+
+    for u, v in G.edges():
+        G[u][v]['weight'] = float(np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos']))
+
+    return G, node_radius_map
+
+
 def robust_graph_loader(pkl_path):
     """
     Intelligently loads a graph from a pickle file, hunting for networkx objects.
-    Includes support for Caravel dictionaries, raw NetworkX graphs, and UNC Skwerer Tree dictionaries.
+    Includes support for Caravel dictionaries, raw NetworkX graphs, UNC Skwerer
+    Tree dictionaries, and MetaIO/TubeTK .tre scenes.
     """
+    if str(pkl_path).lower().endswith('.tre'):
+        return _load_tre_scene(pkl_path)
+
     import sys
     import networkx as nx
     import numpy as np
-    
+
     # Legacy numpy compatibility (kept from original code)
     if 'numpy._core' not in sys.modules:
         try:
@@ -475,7 +604,11 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
     results = {'region_metrics': {}} if use_atlas else {}
     
     # Auto-extract patient name from the graph filename
-    patient_name = os.path.basename(graph_pkl_path).replace('_vessel_data.pkl', '').replace('.pkl', '')
+    patient_name = os.path.basename(graph_pkl_path)
+    if patient_name.endswith('_vessel_data.pkl'):
+        patient_name = patient_name[: -len('_vessel_data.pkl')]
+    else:
+        patient_name = os.path.splitext(patient_name)[0]
     
     if use_atlas: aligned_atlas = sitk.ReadImage(registered_atlas_path)
     
@@ -548,8 +681,8 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
 
             results['region_metrics'][r_id_int] = region_result
 
-        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes)
-    
+        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes, patient_name=patient_name)
+
         n_regions = len(region_nodes)
         print(f"  Found {n_regions} arterial regions. Generating regional VTPs for {patient_name}...")
         regional_actors = []
@@ -604,6 +737,10 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             'Largest_bifurcation_root_mean_curvature', 'Largest_bifurcation_root_mean_square_curvature'
         ]
         tortuosity_sums = {col: 0.0 for col in tortuosity_cols}
+        # Per-column length accumulator: only components that actually defined
+        # a given metric may contribute their length to its denominator (see
+        # the same fix in compute_metrics_for_mask and save_results).
+        tortuosity_lens = {col: 0.0 for col in tortuosity_cols}
         
         for cid, comp_data in true_global_result.items():
             comp_length = comp_data.get('total_length', 0)
@@ -626,16 +763,15 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
                     
                     if not np.isnan(mean_curv):
                         tortuosity_sums[prefix + 'mean_curvature'] += mean_curv * comp_length
+                        tortuosity_lens[prefix + 'mean_curvature'] += comp_length
                     if not np.isnan(mean_sq_curv):
                         tortuosity_sums[prefix + 'mean_square_curvature'] += mean_sq_curv * comp_length
+                        tortuosity_lens[prefix + 'mean_square_curvature'] += comp_length
 
-        # Finalize length-weighted averages
-        if global_data['total_length'] > 0:
-            for col in tortuosity_cols:
-                global_data[col] = tortuosity_sums[col] / global_data['total_length']
-        else:
-            for col in tortuosity_cols:
-                global_data[col] = np.nan
+        # Finalize length-weighted averages, each over its own valid length
+        for col in tortuosity_cols:
+            w = tortuosity_lens[col]
+            global_data[col] = (tortuosity_sums[col] / w) if w > 0 else np.nan
                 
         # Inject True Global Volume from mask if available
         if 'volume' in selected_metrics and true_mask_data is not None:
@@ -643,7 +779,7 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             global_data['volume'] = total_true_volume
             
         global_df = pd.DataFrame([global_data])
-        global_df.to_csv(os.path.join(output_folder, 'global_summary.csv'), index=False)
+        global_df.to_csv(os.path.join(output_folder, f'{patient_name}_global_summary.csv'), index=False)
     
     else:
         print("  Computing global vessel metrics...")
@@ -662,7 +798,7 @@ def extract_metrics(output_folder, graph_pkl_path, selected_metrics, label_map_p
             region_true_volumes['global'] = total_voxel_count * voxel_volume_mm3
 
         results.update(global_result)
-        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes)
+        save_results(results, output_folder, save_segment_masks=None, save_conn_comp_masks=None, region_true_volumes=region_true_volumes, patient_name=patient_name)
 
 # =========================================================================
 #                         STANDALONE CLI EXECUTION
@@ -685,7 +821,7 @@ if __name__ == "__main__":
         'fractal_dimension', 'lacunarity', 'geodesic_length', 'avg_diameter',
         'spline_arc_length', 'spline_chord_length', 'spline_mean_curvature',
         'spline_mean_square_curvature', 'spline_rms_curvature', 'arc_over_chord',
-        'fit_rmse', 'num_loops', 'num_abnormal_degree_nodes'
+        'num_loops', 'num_abnormal_degree_nodes'
     ], help="List of metrics to compute.")
 
     args = parser.parse_args()
