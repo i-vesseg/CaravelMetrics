@@ -1,26 +1,4 @@
-## 💻 Usage
-
-**Contents:** [About](#about) · [Install](#install) · [Running the full pipeline](#running-the-full-pipeline) ·
-[Output](#output) · [Running individual stages](#running-individual-stages) · [Batch processing](#batch-processing) ·
-[QC reports](#qc-reports) · [Testing](#running-the-test-suite)
-
----
-
-## About
-
-CaravelMetrics was built to analyze the **brain** cerebrovascular network: starting from a TOF-MRA
-angiography image and its vessel segmentation mask, it registers an arterial atlas (30 territories,
-Liu et al. 2023) to get territory-level metrics on top of whole-graph ones. That's the pipeline
-described in [Running the full pipeline](#running-the-full-pipeline) below, and the default atlas
-bundled in `Atlas/` is brain-specific.
-
-Underneath, though, graph extraction and metric computation don't know anything about brains --
-they operate on any binary vessel mask, or any vessel graph, regardless of anatomy. So the same
-code has also been used on other vascular structures (e.g. coronary arteries) by skipping
-registration entirely -- either by passing `--no_atlas` to `CaravelMetrics.py`, or by starting
-directly from a mask or a pre-built graph, see [Running individual stages](#running-individual-stages).
-
----
+# 💻 Usage
 
 ## Install
 
@@ -34,7 +12,7 @@ FSL (`flirt`, `bet`, `robustfov`, `fslreorient2std`, `convert_xfm`, `fslmaths`) 
 and on `PATH` separately -- see [INSTALLATION.md](INSTALLATION.md) -- but only if you register to
 an atlas. Graph extraction and whole-graph metrics don't need it.
 
----
+
 
 ## Running the full pipeline
 
@@ -51,14 +29,56 @@ python CaravelMetrics.py \
   --t1     subject001_T1.nii.gz \
   --mra_stripped --t1_stripped \
   --output_dir results/ \
-  --qc
+  --html_qc --registration_snapshot
 ```
 
 If your T1/MRA aren't already skull-stripped, drop `--mra_stripped`/`--t1_stripped` (BET +
 `robustfov` run automatically). If you have no T1 at all, drop `--t1`: registration falls back to
-warping the MNI template directly onto the MRA. Preprocessing flags (`--denoise`, `--debias`,
-`--t1_debias`) and `--registration_qc` (a PNG snapshot of the registered labels, separate from
-`--qc`'s HTML graph report) are optional -- run `python CaravelMetrics.py --help` for the full list.
+warping the MNI template directly onto the MRA. The two QC outputs are independent: `--html_qc`
+writes the interactive HTML graph report, `--registration_snapshot` writes a PNG snapshot of the
+registered atlas labels -- pass either, both, or neither.
+
+### All arguments
+
+```
+$ python CaravelMetrics.py --help
+usage: CaravelMetrics.py [-h] -i IMAGE -m MASK -o OUTPUT_DIR [--t1 T1]
+                         [--template TEMPLATE] [--parcellation PARCELLATION]
+                         [--label_map LABEL_MAP] [--no_atlas]
+                         [--preprocess_mra] [--preprocess_t1] [--mra_stripped]
+                         [--t1_stripped] [--html_qc] [--qc_dir QC_DIR]
+                         [--registration_snapshot]
+
+Caravel - Single Subject Processing Pipeline
+
+options:
+  -h, --help            show this help message and exit
+  -i, --image IMAGE     Path to the subject MRA image.
+  -m, --mask MASK       Path to the binary vessel mask.
+  -o, --output_dir OUTPUT_DIR
+                        Base output directory.
+  --t1 T1               Path to the subject T1 image (optional).
+  --template TEMPLATE   Path to custom MNI T1 template (optional).
+  --parcellation PARCELLATION
+                        Path to custom MNI parcellation (optional).
+  --label_map LABEL_MAP
+                        Path to ArterialAtlasLables.txt for regional naming
+                        (optional).
+  --no_atlas            Skip atlas registration entirely. Graph extraction and
+                        metric computation still run, but without
+                        regional/atlas-based metrics.
+  --preprocess_mra      Apply ANTs denoising + N4 bias correction to the MRA.
+  --preprocess_t1       Apply ANTs denoising + N4 bias correction to the T1.
+  --mra_stripped        Flag if the input MRA is already skull-stripped.
+  --t1_stripped         Flag if the input T1 is already skull-stripped.
+  --html_qc             Also write an interactive HTML QC report for the
+                        extracted graph.
+  --qc_dir QC_DIR       Where to write the QC report (default: the subject's
+                        own output folder).
+  --registration_snapshot
+                        Also write a PNG snapshot of the registered atlas
+                        labels for QC.
+```
 
 ### Without atlas (whole-graph only)
 
@@ -92,15 +112,16 @@ python Metric_extractor.py \
   --mask subject001_vessel_mask.nii.gz
 ```
 
----
+
 
 ## Output
 
 **With atlas**, `results/subject001_MRA/` contains the registered/dilated atlas, the vessel graph
 (`.pkl` + `.vtp`), `subject001_MRA_global_summary.csv` (whole-graph metrics),
 `subject001_MRA_region_summary.csv` + `subject001_MRA_all_components_by_region.csv`
-(per-territory), plus (with `--qc`) an interactive QC report -- every file is prefixed with the
-subject name, so nothing collides if you ever gather several subjects' folders into one place:
+(per-territory), plus the two independent QC outputs (`--html_qc`, `--registration_snapshot`) --
+every file is prefixed with the subject name, so nothing collides if you ever gather several
+subjects' folders into one place:
 
 ```
 results/
@@ -112,14 +133,17 @@ results/
     ├── subject001_MRA_global_summary.csv                     # whole-graph metrics
     ├── subject001_MRA_region_summary.csv                     # per-territory aggregated metrics
     ├── subject001_MRA_all_components_by_region.csv           # per-connected-component metrics
-    ├── subject001_MRA_QC.html                                # QC report (with --qc)
+    ├── subject001_MRA_QC.html                                # HTML graph report (with --html_qc)
+    ├── subject001_MRA_QC_snapshot.png                        # registration PNG (with --registration_snapshot)
     ├── regional_vtps/                                        # one VTP per atlas territory
     ├── regional_results/                                     # per-region, per-component detail + segment CSVs
     └── processing.log
 ```
 
-The QC report defaults into the subject's own folder alongside everything else; pass `--qc_dir` to
-put it somewhere else instead (e.g. a shared `QC/` folder across subjects for a batch run).
+The HTML report defaults into the subject's own folder alongside everything else; pass `--qc_dir`
+to put it somewhere else instead (e.g. a shared `QC/` folder across subjects for a batch run). The
+PNG snapshot is always written next to the registration outputs, since it's generated as part of
+that step.
 
 **Without atlas** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain),
 there's no per-territory breakdown and no `global_summary.csv` -- metrics go to a sibling
@@ -128,10 +152,11 @@ there's no per-territory breakdown and no `global_summary.csv` -- metrics go to 
 `extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies the same
 way whether you ran `CaravelMetrics.py --no_atlas` or the individual stages yourself. E.g.
 `CaravelMetrics.py --no_atlas --output_dir results/ --image subject001_MRA.nii.gz ...` writes the
-vessel graph (and QC report, with `--qc`) to `results/subject001_MRA/` but metrics to
-`results_GLOBAL/subject001_MRA/`.
+vessel graph (and HTML QC report, with `--html_qc`) to `results/subject001_MRA/` but metrics to
+`results_GLOBAL/subject001_MRA/`. `--registration_snapshot` has no effect with `--no_atlas`, since
+there's no registration step to snapshot.
 
----
+
 
 ## Running individual stages
 
@@ -193,82 +218,6 @@ registered_atlas_path, inv_matrix_path = process_registration(
     t1_stripped=True,
 )
 ```
-
----
-
-## Batch processing
-
-There's no built-in batch runner (each subject's data layout tends to differ), but the pattern is
-short -- parallelize with `ProcessPoolExecutor` over subjects, reusing `extract_graph`'s built-in
-skip-if-already-processed check to make reruns cheap:
-
-```python
-import glob
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
-from Graph_extractor import extract_graph
-from Metric_extractor import extract_metrics
-
-MASK_DIR, OUTPUT_DIR = "data/masks", "results/cohort"
-METRICS = ["total_length", "volume", "num_bifurcations", "bifurcation_density", "num_loops"]
-
-def process_subject(mask_path):
-    subject_id = Path(mask_path).name.split(".")[0]
-    out_dir = Path(OUTPUT_DIR, subject_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    graph_pkl = extract_graph(nifti_path=mask_path, output_folder=str(out_dir))
-    extract_metrics(output_folder=str(out_dir), graph_pkl_path=graph_pkl,
-                     selected_metrics=METRICS, mask_path=mask_path)
-
-if __name__ == "__main__":
-    masks = glob.glob(f"{MASK_DIR}/*.nii.gz")
-    with ProcessPoolExecutor(max_workers=4) as ex:
-        list(ex.map(process_subject, masks))
-```
-
-For atlas-based batch runs, register each subject first (this is the slow, FSL-dependent step) and
-reuse the registered atlas path across reruns the same way.
-
----
-
-## QC reports
-
-Two independent QC outputs, either usable standalone:
-
-- **Registration QC** (`Atlas_Registration.generate_qc_snapshot`, or `--qc`/`--registration_qc` on
-  the CLIs above): a static PNG grid of sagittal/coronal/axial slices with the registered atlas
-  contoured on top of the MRA.
-- **Graph QC** (`QC_report.generate_qc_report`, or `--qc` on `CaravelMetrics.py`): an interactive
-  HTML report (3D graph viewer, per-component/per-region metric tables) built directly from a
-  `vessel_data.pkl`:
-
-```python
-from QC_report import generate_qc_report
-
-generate_qc_report(
-    graph_pkl_path="results/subject001_vessel_mask_vessel_data.pkl",
-    output_dir="results/QC/",
-    mask_path="subject001_vessel_mask.nii.gz",
-)
-```
-
----
-
-## Running the test suite
-
-The repo ships a small pytest smoke-test suite with its own bundled sample data (not meant as
-usage examples -- see [tests/test_pipeline.py](../tests/test_pipeline.py)) that exercises the full
-pipeline end-to-end, including the brain full-pipeline flow, whole-graph-only on non-brain masks,
-and metrics-only on external graph formats:
-
-```bash
-pip install pytest
-pytest tests/ -v
-```
-
-Results are written to `tests/output/` (gitignored) so you can inspect them after the run.
-
----
 
 ## Reference: input data requirements
 

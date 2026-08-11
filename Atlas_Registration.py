@@ -136,8 +136,7 @@ def atlas_registration(
     image_path: str,
     output_dir: str = ".",
     image_t1: str = None,
-    denoise_mra: bool = False,
-    debias_mra: bool = False,
+    preprocess_mra: bool = False,
     preprocess_t1: bool = False,
     mra_stripped: bool = False,
     t1_stripped: bool = False,
@@ -147,16 +146,16 @@ def atlas_registration(
     mra_prefix = os.path.basename(image_path).split('.')[0]
     files_to_cleanup = []
 
-    # --- MRA PREPROCESSING (independent denoise / bias correction) ---
-    if denoise_mra or debias_mra:
+    # --- MRA PREPROCESSING (ANTs denoise + bias correction) ---
+    if preprocess_mra:
         image_path = apply_ants_preprocessing(
-            image_path, output_dir, do_denoise=denoise_mra, do_debias=debias_mra, cleanup_list=files_to_cleanup
+            image_path, output_dir, do_denoise=True, do_debias=True, cleanup_list=files_to_cleanup
         )
 
-    # --- T1 PREPROCESSING (Bias only) ---
+    # --- T1 PREPROCESSING (ANTs denoise + bias correction) ---
     if image_t1 and os.path.exists(image_t1) and preprocess_t1:
         image_t1 = apply_ants_preprocessing(
-            image_t1, output_dir, do_denoise=False, do_debias=True, cleanup_list=files_to_cleanup
+            image_t1, output_dir, do_denoise=True, do_debias=True, cleanup_list=files_to_cleanup
         )
 
     # ---------------------------------------------------------
@@ -273,8 +272,7 @@ def process_registration(
     mni_parcellation=None,
     mni_t1_template=None,
     image_t1_path=None,
-    denoise_mra=False,
-    debias_mra=False,
+    preprocess_mra=False,
     preprocess_t1=False,
     mra_stripped=False,
     t1_stripped=False,
@@ -314,8 +312,7 @@ def process_registration(
         image_path=image_path,
         output_dir=output_dir,
         image_t1=image_t1_path,
-        denoise_mra=denoise_mra,
-        debias_mra=debias_mra,
+        preprocess_mra=preprocess_mra,
         preprocess_t1=preprocess_t1,
         mra_stripped=mra_stripped,
         t1_stripped=t1_stripped,
@@ -331,15 +328,14 @@ if __name__ == "__main__":
     parser.add_argument("--template", default=None, help="Override path for the MNI template.")
     parser.add_argument("--output_dir", default=".", help="Directory to save outputs.")
     
-    parser.add_argument("--denoise_mra", action="store_true", help="Apply ANTs DenoiseImage to the MRA.")
-    parser.add_argument("--debias_mra", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the MRA.")
-    parser.add_argument("--preprocess_T1", action="store_true", help="Apply ANTs N4 Bias Correction to T1.")
-    
+    parser.add_argument("--preprocess_mra", action="store_true", help="Apply ANTs denoising + N4 bias correction to the MRA.")
+    parser.add_argument("--preprocess_t1", action="store_true", help="Apply ANTs denoising + N4 bias correction to the T1.")
+
     parser.add_argument("--mra_stripped", action="store_true", help="Flag if the input MRA is already skull-stripped.")
     parser.add_argument("--t1_stripped", action="store_true", help="Flag if the input T1 is already skull-stripped.")
-    
-    # New QC Flag
-    parser.add_argument("--qc", action="store_true", help="Generate a PNG snapshot of the registered labels for Quality Control.")
+
+    parser.add_argument("--registration_snapshot", action="store_true",
+                        help="Generate a PNG snapshot of the registered labels for Quality Control.")
 
     args = parser.parse_args()
 
@@ -350,12 +346,11 @@ if __name__ == "__main__":
             mni_parcellation=args.parcellation,
             mni_t1_template=args.template,
             image_t1_path=args.t1,
-            denoise_mra=args.denoise_mra,
-            debias_mra=args.debias_mra,
-            preprocess_t1=args.preprocess_T1,
+            preprocess_mra=args.preprocess_mra,
+            preprocess_t1=args.preprocess_t1,
             mra_stripped=args.mra_stripped,
             t1_stripped=args.t1_stripped,
-            generate_qc=args.qc
+            generate_qc=args.registration_snapshot
         )
         logger.info(f"Registration successful! Outputs saved to: {args.output_dir}")
     except Exception as e:

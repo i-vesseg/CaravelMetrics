@@ -31,20 +31,21 @@ def main():
                              "computation still run, but without regional/atlas-based metrics.")
     
     # Preprocessing flags
-    parser.add_argument("--denoise", action="store_true", help="Apply ANTs DenoiseImage to the MRA.")
-    parser.add_argument("--debias", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the MRA.")
-    parser.add_argument("--t1_debias", action="store_true", help="Apply ANTs N4BiasFieldCorrection to the T1.")
+    parser.add_argument("--preprocess_mra", action="store_true",
+                        help="Apply ANTs denoising + N4 bias correction to the MRA.")
+    parser.add_argument("--preprocess_t1", action="store_true",
+                        help="Apply ANTs denoising + N4 bias correction to the T1.")
 
     # Skip skull-stripping if inputs are already stripped
     parser.add_argument("--mra_stripped", action="store_true", help="Flag if the input MRA is already skull-stripped.")
     parser.add_argument("--t1_stripped", action="store_true", help="Flag if the input T1 is already skull-stripped.")
 
     # QC reporting
-    parser.add_argument("--qc", action="store_true",
+    parser.add_argument("--html_qc", action="store_true",
                         help="Also write an interactive HTML QC report for the extracted graph.")
     parser.add_argument("--qc_dir", default=None,
                         help="Where to write the QC report (default: the subject's own output folder).")
-    parser.add_argument("--registration_qc", action="store_true",
+    parser.add_argument("--registration_snapshot", action="store_true",
                         help="Also write a PNG snapshot of the registered atlas labels for QC.")
     
     args = parser.parse_args()
@@ -109,12 +110,11 @@ def main():
                 mni_parcellation=args.parcellation,
                 mni_t1_template=args.template,
                 image_t1_path=args.t1,
-                denoise_mra=args.denoise,
-                debias_mra=args.debias,
-                preprocess_t1=args.t1_debias,
+                preprocess_mra=args.preprocess_mra,
+                preprocess_t1=args.preprocess_t1,
                 mra_stripped=args.mra_stripped,
                 t1_stripped=args.t1_stripped,
-                generate_qc=args.registration_qc,
+                generate_qc=args.registration_snapshot,
             )
             logger.info(f"Registration complete. Registered atlas saved to: {registered_atlas_path}")
         except Exception as e:
@@ -164,7 +164,7 @@ def main():
     # ---------------------------------------------------------
     # STEP 4: QC REPORT (optional)
     # ---------------------------------------------------------
-    if args.qc:
+    if args.html_qc:
         logger.info("--- STEP 4: QC REPORT ---")
         # Imported here rather than at module scope so the pipeline still runs
         # for anyone without plotly installed, as long as they don't ask for QC.
