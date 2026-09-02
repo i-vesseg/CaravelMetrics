@@ -2,6 +2,7 @@ import logging
 import os
 import argparse
 import subprocess
+import sys
 
 # Setup basic logging for standalone execution
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -355,3 +356,4 @@ if __name__ == "__main__":
         logger.info(f"Registration successful! Outputs saved to: {args.output_dir}")
     except Exception as e:
         logger.error(f"Registration failed: {e}")
+        sys.exit(1)

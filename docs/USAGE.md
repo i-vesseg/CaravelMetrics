@@ -14,11 +14,28 @@ an atlas. Graph extraction and whole-graph metrics don't need it.
 
 
 
+## Pipeline at a glance
+
+The pipeline is four stages. `CaravelMetrics.py` runs them end to end for one subject, or you can
+call each stage on its own (see [Running individual stages](#running-individual-stages)).
+
+| # | Stage | Script | Input → Output |
+|---|-------|--------|----------------|
+| 1 | Atlas registration *(optional)* | `Atlas_Registration.py` | MRA (+T1) → registered atlas in MRA space |
+| 2 | Graph extraction | `Graph_extractor.py` | vessel mask → vessel graph (`.pkl` + `.vtp`) |
+| 3 | Metric computation | `Metric_extractor.py` | graph (+atlas, +mask) → metric CSVs |
+| 4 | QC report *(optional)* | `QC_report.py` | graph (+mask, +atlas) → interactive HTML |
+
+Stage 1 (and its FSL dependency) is only needed for **regional** metrics. Without an atlas, stages
+2–3 still give you whole-graph metrics for any binary vessel mask, any anatomy or modality.
+
+
+
 ## Running the full pipeline
 
 `CaravelMetrics.py` is the single-command entry point: given a subject's MRA + vessel mask (+
-optional T1), it runs registration, graph extraction, and metric computation in one call --
-or skips registration with `--no_atlas`, see [below](#without-atlas-whole-graph-only).
+optional T1), it runs registration, graph extraction, and metric computation in one call -- plus
+the HTML QC report with `--html_qc`. Use `--no_atlas` to skip registration.
 
 ### With atlas (regional analysis)
 
@@ -38,16 +55,33 @@ warping the MNI template directly onto the MRA. The two QC outputs are independe
 writes the interactive HTML graph report, `--registration_snapshot` writes a PNG snapshot of the
 registered atlas labels -- pass either, both, or neither.
 
+### Without atlas (whole-graph only)
+
+Pass `--no_atlas` to skip registration -- and the FSL dependency it requires -- while still
+running graph extraction and metric computation in one call:
+
+```bash
+python CaravelMetrics.py \
+  --image  subject001_MRA.nii.gz \
+  --mask   subject001_vessel_mask.nii.gz \
+  --output_dir results/ \
+  --no_atlas
+```
+
+`--image` is still required (it names the subject's output folder), but no atlas/T1 arguments are
+read. Metrics land in the same subject folder, just without the regional breakdown -- see
+[Output](#output).
+
 ### All arguments
 
 ```
 $ python CaravelMetrics.py --help
 usage: CaravelMetrics.py [-h] -i IMAGE -m MASK -o OUTPUT_DIR [--t1 T1]
                          [--template TEMPLATE] [--parcellation PARCELLATION]
-                         [--label_map LABEL_MAP] [--no_atlas]
-                         [--preprocess_mra] [--preprocess_t1] [--mra_stripped]
-                         [--t1_stripped] [--html_qc] [--qc_dir QC_DIR]
-                         [--registration_snapshot]
+                         [--label_map LABEL_MAP] [--no_atlas] [--preprocess_mra]
+                         [--preprocess_t1] [--mra_stripped] [--t1_stripped]
+                         [--min_branch_len MIN_BRANCH_LEN] [--html_qc]
+                         [--qc_dir QC_DIR] [--registration_snapshot]
 
 Caravel - Single Subject Processing Pipeline
 
@@ -64,13 +98,16 @@ options:
   --label_map LABEL_MAP
                         Path to ArterialAtlasLables.txt for regional naming
                         (optional).
-  --no_atlas            Skip atlas registration entirely. Graph extraction and
-                        metric computation still run, but without
-                        regional/atlas-based metrics.
+  --no_atlas            Skip atlas registration; graph and metric steps still
+                        run, but without regional metrics.
   --preprocess_mra      Apply ANTs denoising + N4 bias correction to the MRA.
   --preprocess_t1       Apply ANTs denoising + N4 bias correction to the T1.
   --mra_stripped        Flag if the input MRA is already skull-stripped.
   --t1_stripped         Flag if the input T1 is already skull-stripped.
+  --min_branch_len MIN_BRANCH_LEN
+                        Prune terminal branches (leaf-to-bifurcation hairs)
+                        shorter than this many mm as skeletonization spurs
+                        (default: 2.0).
   --html_qc             Also write an interactive HTML QC report for the
                         extracted graph.
   --qc_dir QC_DIR       Where to write the QC report (default: the subject's
@@ -80,26 +117,205 @@ options:
                         labels for QC.
 ```
 
-### Without atlas (whole-graph only)
 
-Pass `--no_atlas` to skip registration -- and the FSL dependency it requires -- while still
-running graph extraction and metric computation in one call:
+
+## Running individual stages
+
+Each stage can be run on its own. Run them in order (1 → 2 → 3, plus 4 for QC), or skip straight
+to the stage you need if you already have its input -- e.g. jump to stage 3 if you already have a
+graph. Every stage is also importable as a plain Python function (see [Python API](#python-api)).
+
+For each stage below: the **most basic command** first, then the full `--help`.
+
+### Stage 1 — Atlas registration *(optional, brain MRA)*
+
+Warps the arterial atlas into the subject's MRA space. Needs FSL. Useful on its own for
+pre-computing atlases for a cohort ahead of a batch graph/metrics run.
 
 ```bash
-python CaravelMetrics.py \
-  --image  subject001_MRA.nii.gz \
-  --mask   subject001_vessel_mask.nii.gz \
-  --output_dir results/ \
-  --no_atlas
+python Atlas_Registration.py \
+  --image subject001_MRA.nii.gz \
+  --output_dir results/registration/
 ```
 
-`--image` is still required (it's used to name the subject's output folder), but no MRA/atlas/T1
-arguments are read. Metrics land in a sibling `_GLOBAL` folder instead of the atlas layout -- see
-[Output](#output) below.
+```
+$ python Atlas_Registration.py --help
+usage: Atlas_Registration.py [-h] --image IMAGE [--t1 T1]
+                             [--parcellation PARCELLATION]
+                             [--template TEMPLATE] [--output_dir OUTPUT_DIR]
+                             [--preprocess_mra] [--preprocess_t1]
+                             [--mra_stripped] [--t1_stripped]
+                             [--registration_snapshot]
 
-You can also chain graph extraction and metric computation yourself, which is exactly what
-`--no_atlas` does internally, minus the registration step in front. This is the way to go if you
-don't have an MRA/reference image at all, or you're working from a mask produced elsewhere:
+Atlas to MRA Registration Module
+
+options:
+  -h, --help            show this help message and exit
+  --image IMAGE         Path to the reference MRA image.
+  --t1 T1               Path to the subject T1 image.
+  --parcellation PARCELLATION
+                        Path to custom MNI parcellation.
+  --template TEMPLATE   Override path for the MNI template.
+  --output_dir OUTPUT_DIR
+                        Directory to save outputs.
+  --preprocess_mra      Apply ANTs denoising + N4 bias correction to the MRA.
+  --preprocess_t1       Apply ANTs denoising + N4 bias correction to the T1.
+  --mra_stripped        Flag if the input MRA is already skull-stripped.
+  --t1_stripped         Flag if the input T1 is already skull-stripped.
+  --registration_snapshot
+                        Generate a PNG snapshot of the registered labels for
+                        Quality Control.
+```
+
+### Stage 2 — Graph extraction
+
+Turns a binary vessel mask into a vessel graph (`.pkl` + `.vtp`). No FSL, no atlas, not
+brain-specific -- works for any binary vessel mask (TOF-MRA, CTA, ...).
+
+```bash
+python Graph_extractor.py \
+  --mask subject001_vessel_mask.nii.gz \
+  --output_dir results/
+```
+
+```
+$ python Graph_extractor.py --help
+usage: Graph_extractor.py [-h] --mask MASK --output_dir OUTPUT_DIR
+                          [--smooth_iters SMOOTH_ITERS]
+                          [--smooth_alpha SMOOTH_ALPHA]
+                          [--smooth_reference_spacing SMOOTH_REFERENCE_SPACING]
+                          [--intensity_thresh INTENSITY_THRESH]
+                          [--orphan_dist ORPHAN_DIST] [--merge_dist MERGE_DIST]
+                          [--target_iso TARGET_ISO]
+                          [--min_branch_len MIN_BRANCH_LEN]
+
+Vessel Graph Extractor Module
+
+options:
+  -h, --help            show this help message and exit
+  --mask MASK           Path to the binary vessel mask NIfTI file.
+  --output_dir OUTPUT_DIR
+                        Directory to save the resulting .pkl and .vtp files.
+  --smooth_iters SMOOTH_ITERS
+                        Laplacian smoothing iterations at the reference
+                        resolution (default: 2); scaled per-scan by voxel
+                        spacing.
+  --smooth_alpha SMOOTH_ALPHA
+                        Laplacian smoothing alpha (default: 0.8).
+  --smooth_reference_spacing SMOOTH_REFERENCE_SPACING
+                        Reference isotropic spacing (mm) that --smooth_iters is
+                        calibrated for (default: 0.5).
+  --intensity_thresh INTENSITY_THRESH
+                        Intensity threshold for edge pruning (default: 0.6).
+  --orphan_dist ORPHAN_DIST
+                        Orphan detection distance threshold mm (default: 2.5).
+  --merge_dist MERGE_DIST
+                        Orphan merge distance threshold mm (default: 3.0).
+  --target_iso TARGET_ISO
+                        Target isotropic voxel spacing in mm (default: auto --
+                        this image's finest native axis, so no axis is
+                        downsampled).
+  --min_branch_len MIN_BRANCH_LEN
+                        Prune terminal branches (leaf-to-bifurcation hairs)
+                        shorter than this many mm as skeletonization spurs
+                        (default: 2.0); raise to remove more hairs.
+```
+
+### Stage 3 — Metric computation
+
+Computes morphometrics from a graph. Pass `--atlas` (a registered atlas from stage 1) for the
+regional breakdown; pass `--mask` for exact voxel-counted volume. Both optional -- with neither,
+you get whole-graph metrics only.
+
+```bash
+python Metric_extractor.py \
+  --graph results/subject001_vessel_mask_vessel_data.pkl \
+  --out_dir results/
+```
+
+```
+$ python Metric_extractor.py --help
+usage: Metric_extractor.py [-h] --graph GRAPH --out_dir OUT_DIR [--mask MASK]
+                           [--label_map LABEL_MAP] [--atlas ATLAS]
+
+Extract Metrics from Saved Vessel Graph
+
+options:
+  -h, --help            show this help message and exit
+  --graph GRAPH         Path to the .pkl graph file.
+  --out_dir OUT_DIR     Directory to save the CSV metrics files.
+  --mask MASK           Path to original binary mask for EXACT volume
+                        calculation (optional).
+  --label_map LABEL_MAP
+                        Path to ArterialAtlasLables.txt (optional).
+  --atlas ATLAS         Path to the registered atlas NIfTI (optional).
+```
+
+### Stage 4 — QC report *(optional)*
+
+Writes a self-contained interactive HTML report per subject: a 3D view of the skeleton graph, the
+segmentation surface (with `--mask`), and sortable per-segment stats -- computed with the *same*
+functions as stage 3, so the numbers match the CSVs. Point it at one graph (`--graph`) or a whole
+results tree (`--results_dir`, batch mode).
+
+```bash
+python QC_report.py \
+  --graph results/subject001_vessel_mask_vessel_data.pkl \
+  --out results/QC/
+```
+
+```
+$ python QC_report.py --help
+usage: QC_report.py [-h] (--graph GRAPH | --results_dir RESULTS_DIR) --out OUT
+                    [--mask MASK] [--atlas ATLAS] [--mask_dir MASK_DIR]
+                    [--atlas_dir ATLAS_DIR] [--label_map LABEL_MAP]
+                    [--plotlyjs {directory,inline,cdn}]
+                    [--mesh_faces MESH_FACES] [--no_mesh]
+                    [--max_segments_per_root MAX_SEGMENTS_PER_ROOT]
+                    [--skip_existing] [--line_width LINE_WIDTH]
+
+Generate interactive HTML QC reports for Caravel vessel graphs.
+
+options:
+  -h, --help            show this help message and exit
+  --graph GRAPH         Path to a single <subject>_vessel_data.pkl.
+  --results_dir RESULTS_DIR
+                        Directory tree to scan for *_vessel_data.pkl.
+  --out OUT             Output directory for the HTML reports.
+  --mask MASK           Binary vessel mask NIfTI for the translucent surface
+                        and the voxel-counted volume (single-graph mode).
+  --atlas ATLAS         Registered arterial atlas NIfTI for region colouring
+                        (single-graph mode).
+  --mask_dir MASK_DIR   Directory of masks, matched to subjects by name (batch
+                        mode).
+  --atlas_dir ATLAS_DIR
+                        Directory of registered atlases, matched by name (batch
+                        mode).
+  --label_map LABEL_MAP
+                        ArterialAtlasLables.txt for region names.
+  --plotlyjs {directory,inline,cdn}
+                        How to ship plotly.js: 'directory' (default) writes one
+                        shared file next to the reports; 'inline' embeds it in
+                        each file (~4.9 MB); 'cdn' needs internet.
+  --mesh_faces MESH_FACES
+                        Target triangle count for the decimated mask surface
+                        (default: 45000).
+  --no_mesh             Skip the mask surface even when a mask is available.
+  --max_segments_per_root MAX_SEGMENTS_PER_ROOT
+                        Cap segments stored per root, keeping the longest
+                        (default: all).
+  --skip_existing       Do not regenerate reports that already exist.
+  --line_width LINE_WIDTH
+                        Initial skeleton line width shown in the report;
+                        adjustable afterwards with the in-page slider (default:
+                        3.0).
+```
+
+### Chaining stages by hand
+
+Chaining stages 2 → 3 is exactly what `--no_atlas` does internally, minus registration. This is the
+way to go if you don't have an MRA/reference image at all, or you're working from a mask produced
+elsewhere:
 
 ```bash
 python Graph_extractor.py \
@@ -111,6 +327,52 @@ python Metric_extractor.py \
   --out_dir results/ \
   --mask subject001_vessel_mask.nii.gz
 ```
+
+### Already have a graph
+
+You can skip graph extraction too. `Metric_extractor` reads more than Caravel's own pickle:
+`robust_graph_loader` auto-detects a raw NetworkX graph, a UNC Skwerer/Bullitt tree dictionary, or
+a MetaIO/TubeTK `.tre` scene, so any of these work as `--graph` directly. This is the path for
+structures from other vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
+
+```bash
+python Metric_extractor.py --graph my_vessel_tree.pkl --out_dir results/
+python Metric_extractor.py --graph my_vessel_tree.tre --out_dir results/
+```
+
+### Python API
+
+Every stage is a plain function, so you can wire the pipeline into your own scripts.
+
+```python
+from Atlas_Registration import process_registration
+from Graph_extractor import extract_graph
+from Metric_extractor import extract_metrics
+
+registered_atlas_path, inv_matrix_path = process_registration(
+    image_path="subject001_MRA.nii.gz",
+    output_dir="results/registration/",
+    image_t1_path="subject001_T1.nii.gz",
+    mra_stripped=True,
+    t1_stripped=True,
+)
+
+graph_pkl_path = extract_graph(
+    nifti_path="subject001_vessel_mask.nii.gz",
+    output_folder="results/",
+)
+
+extract_metrics(
+    output_folder="results/",
+    graph_pkl_path=graph_pkl_path,
+    mask_path="subject001_vessel_mask.nii.gz",     # optional: exact volume
+    registered_atlas_path=registered_atlas_path,   # optional: regional metrics
+)
+```
+
+`extract_metrics` always computes the full metric set; there is no metric-selection argument. Drop
+`registered_atlas_path` for whole-graph-only metrics, and `mask_path` if you don't need the exact
+voxel-counted volume.
 
 
 
@@ -146,78 +408,15 @@ PNG snapshot is always written next to the registration outputs, since it's gene
 that step.
 
 **Without atlas** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain),
-there's no per-territory breakdown and no `global_summary.csv` -- metrics go to a sibling
-`<output_folder>_GLOBAL/` directory as `region_summary.csv` (with a single `global` pseudo-region)
-+ `all_components_by_region.csv`, both still prefixed with the subject name. This "GLOBAL" split is
+there's no per-territory breakdown and no `global_summary.csv` -- metrics go straight into
+`output_folder` (the same folder you passed in) as `region_summary.csv` (with a single `global`
+pseudo-region) + `all_components_by_region.csv`, both still prefixed with the subject name. This is
 `extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies the same
-way whether you ran `CaravelMetrics.py --no_atlas` or the individual stages yourself. E.g.
-`CaravelMetrics.py --no_atlas --output_dir results/ --image subject001_MRA.nii.gz ...` writes the
-vessel graph (and HTML QC report, with `--html_qc`) to `results/subject001_MRA/` but metrics to
-`results_GLOBAL/subject001_MRA/`. `--registration_snapshot` has no effect with `--no_atlas`, since
-there's no registration step to snapshot.
+way whether you ran `CaravelMetrics.py --no_atlas` or the individual stages yourself.
+`--registration_snapshot` has no effect with `--no_atlas`, since there's no registration step to
+snapshot.
 
 
-
-## Running individual stages
-
-Each stage -- registration, graph extraction, metric computation -- can be called on its own, both
-as a CLI and as a plain Python function. This is how the pipeline extends beyond brain MRA: if you
-already have a mask, or already have a graph, you don't need registration or graph extraction at
-all, and nothing here is brain-specific.
-
-### Already have a mask
-
-Same as [Without atlas](#without-atlas-whole-graph-only) above: run `Graph_extractor.py` then
-`Metric_extractor.py` directly. Works for any binary vessel mask, any anatomy or modality (TOF-MRA,
-CTA, ...) -- registration and the arterial atlas are brain/MRA-specific, but graph extraction and
-metrics are not.
-
-### Already have a graph
-
-Skip graph extraction too. `Metric_extractor.extract_metrics` doesn't require a mask if you already
-have a vessel graph -- `robust_graph_loader` auto-detects Caravel's own pickle format, a raw
-NetworkX graph, a UNC Skwerer/Bullitt tree dictionary, or a MetaIO/TubeTK `.tre` scene, so any of
-these work as `--graph`/`graph_pkl_path` directly. This is the path for structures from other
-vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
-
-```bash
-python Metric_extractor.py --graph my_vessel_tree.pkl --out_dir results/
-python Metric_extractor.py --graph my_vessel_tree.tre --out_dir results/
-```
-
-```python
-from Metric_extractor import extract_metrics
-
-extract_metrics(
-    output_folder="results/",
-    graph_pkl_path="my_vessel_tree.tre",
-    selected_metrics=["total_length", "num_bifurcations", "spline_mean_curvature", "num_loops"],
-)
-```
-
-### Registration only
-
-Useful for pre-computing atlases for a cohort ahead of a batch graph/metrics run.
-
-```bash
-python Atlas_Registration.py \
-  --image subject001_MRA.nii.gz \
-  --t1    subject001_T1.nii.gz \
-  --mra_stripped --t1_stripped \
-  --output_dir results/registration/
-```
-
-```python
-from Atlas_Registration import process_registration
-
-registered_atlas_path, inv_matrix_path = process_registration(
-    image_path="subject001_MRA.nii.gz",
-    output_dir="results/registration/",
-    image_t1_path="subject001_T1.nii.gz",
-    mra_stripped=True,
-    t1_stripped=True,
-)
-```
 
 ## Reference: input data requirements
 

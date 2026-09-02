@@ -3,6 +3,7 @@ Results*/
 IXI*/
 tests/output*/
 test*/
+QC_segment_comparison*/
 
 # Random files
 IXI.csv

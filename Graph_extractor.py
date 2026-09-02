@@ -14,6 +14,47 @@ from nibabel.affines import apply_affine
 #                             HELPER FUNCTIONS
 # =========================================================================
 
+def prune_terminal_hairs(G, min_branch_length_mm):
+    """Remove leaf-to-bifurcation "hairs" shorter than min_branch_length_mm,
+    in place. Walks each degree-1 endpoint's chain to its nearest bifurcation
+    and prunes it if the cumulative length is under threshold (a per-edge
+    check would miss multi-hop hairs).
+
+    Terminal-only by construction: candidates are found by Dijkstra from a
+    degree-1 leaf, so a bifurcation-to-bifurcation connector is never a
+    candidate, however short. A flat mm threshold (not radius-scaled) is
+    deliberate: skeleton spurs are a roughly fixed physical size, so scaling
+    with caliber would delete genuine small distal vessels near thick trunks.
+
+    Uses node positions directly (not the 'weight' edge attribute, which is
+    only set later in the pipeline).
+    """
+    def _euclid_weight(u, v, _d):
+        return np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
+
+    pruning = True
+    while pruning:
+        pruning = False
+        endpoints = [n for n, d in G.degree() if d == 1]
+        for ep in endpoints:
+            if ep not in G:
+                continue
+            try:
+                dist, path = nx.single_source_dijkstra(
+                    G, ep, cutoff=min_branch_length_mm, weight=_euclid_weight
+                )
+            except nx.NodeNotFound:
+                continue
+            bif_targets = [n for n in dist if n != ep and G.degree(n) >= 3]
+            if not bif_targets:
+                continue
+            nearest_bif = min(bif_targets, key=lambda n: dist[n])
+            chain = path[nearest_bif][:-1]  # exclude the bifurcation itself
+            G.remove_nodes_from(chain)
+            pruning = True
+    return G
+
+
 def preprocess_mask(data):
     """Applies a 3D binary fill holes operation to the vascular mask."""
     # binary_fill_holes requires a boolean array and returns a boolean array.
@@ -45,25 +86,12 @@ def crop_to_mask_bbox(data, affine, voxel_sizes, margin_mm=5.0):
 
 def resample_to_isotropic(data, affine, voxel_sizes, target_spacing=0.5):
     """
-    Resample a binary mask to isotropic voxel spacing.
+    Resample a binary mask to isotropic voxel spacing, returning
+    (resampled_mask, new_affine, new_voxel_sizes).
 
-    Interpolates the signed distance transform (a smooth field) rather than
-    the binary mask directly, then re-thresholds at 0 -- avoids the
-    staircase/aliasing artifacts that thresholding a directly-interpolated
-    step function produces, especially when downsampling.
-
-    Parameters
-    ----------
-    data         : np.ndarray  - binary mask (any numeric dtype)
-    affine       : np.ndarray  - 4x4 NIfTI affine
-    voxel_sizes  : np.ndarray  - (3,) current voxel sizes in mm
-    target_spacing : float     - desired isotropic voxel size in mm
-
-    Returns
-    -------
-    resampled_data  : np.ndarray  - binary mask at target_spacing
-    new_affine      : np.ndarray  - 4x4 updated affine
-    new_voxel_sizes : np.ndarray  - (3,) all equal to target_spacing
+    Interpolates the signed distance transform (a smooth field) and
+    re-thresholds at 0, rather than interpolating the binary step directly --
+    this avoids the staircase/aliasing artifacts of the latter.
     """
     zoom_factors = np.array(voxel_sizes) / target_spacing
 
@@ -122,7 +150,8 @@ def extract_graph(
     intensity_threshold: float = 0.6,
     orphan_distance_threshold: float = 2.5,
     merge_distance: float = 3.0,
-    target_iso_spacing: float = None
+    target_iso_spacing: float = None,
+    min_branch_length_mm: float = 2.0
 ):
     case_name = os.path.basename(output_folder)
     print(f"\n{'=' * 60}")
@@ -130,16 +159,11 @@ def extract_graph(
     print(f"File: {nifti_path}")
     print(f"{'=' * 60}")
 
-    # Extract clean base name from the input file
     base_name = os.path.basename(nifti_path).split('.')[0]
 
     os.makedirs(output_folder, exist_ok=True)
     output_pkl = os.path.join(output_folder, f"{base_name}_vessel_data.pkl")
     output_vtp = os.path.join(output_folder, f"{base_name}_vessel_graph.vtp")
-
-    if os.path.exists(output_pkl):
-        print(f"  -> Output PKL already exists. Skipping case.")
-        return output_pkl
 
     # -------------------------------------------------------------------------
     # 1. LOAD DATA
@@ -167,9 +191,8 @@ def extract_graph(
           f"({100 * np.prod(data.shape) / np.prod(orig_shape):.1f}% of original volume)")
 
     # 1.6  RESAMPLE TO ISOTROPIC SPACE -- skeletonize() is sensitive to voxel
-    # sampling density, so anisotropic data biases metrics along the
-    # finer-resolution axes. Default target is this image's own finest native
-    # axis, so every axis is only ever upsampled, never downsampled.
+    # sampling density, so anisotropic data biases metrics. Default target is
+    # this image's finest native axis, so no axis is ever downsampled.
     if target_iso_spacing is None:
         target_iso_spacing = float(np.min(voxel_sizes))
         print(f"  Auto isotropic target: {target_iso_spacing:.3f} mm "
@@ -186,12 +209,9 @@ def extract_graph(
         print(f"  Voxel spacing {np.round(voxel_sizes, 3)} mm already close to "
               f"target {target_iso_spacing:.2f} mm — skipping resample.")
 
-    # Resolution-scaled smoothing dose: a fixed iteration count covers less
-    # physical distance at finer voxel spacing, so it under-smooths finer
-    # scans relative to coarser ones. Scale iterations by
-    # (reference/actual spacing)^2 to keep the physical smoothing radius
-    # comparable across scans, capped at smooth_iters_max to avoid
-    # over-smoothing at extreme spacing ratios.
+    # Resolution-scaled smoothing dose: scale iterations by
+    # (reference/actual spacing)^2 so the physical smoothing radius stays
+    # comparable across scans, capped to avoid over-smoothing at fine spacing.
     smooth_iters_effective = min(smooth_iters_max, max(1, round(
         smooth_iters * (smooth_reference_spacing_mm / target_iso_spacing) ** 2
     )))
@@ -224,10 +244,9 @@ def extract_graph(
     # Distance transform for accurate radius sampling (in mm)
     full_dist_map_vox = distance_transform_edt(data > 0, sampling=voxel_sizes).astype(np.float32)
 
-    # 4. ORPHAN DETECTION (QC diagnostic only -- not added to the graph).
-    # Orphans are mask regions the skeleton never reached; stitching them
-    # into the graph would fabricate off-centerline segments and false
-    # bifurcations, so they're only counted as a segmentation-gap signal.
+    # 4. ORPHAN DETECTION -- QC diagnostic only, never added to the graph.
+    # Orphans are mask regions the skeleton never reached; adding them would
+    # fabricate off-centerline segments, so they're only counted as a gap signal.
     print(f"  Detecting orphan regions (Threshold > {orphan_distance_threshold} mm)...")
     dist_to_skel = distance_transform_edt(~skeleton_mask, sampling=voxel_sizes).astype(np.float32)
     del skeleton_mask  # only needed to build `~skeleton_mask` above
@@ -236,11 +255,13 @@ def extract_graph(
     del dist_to_skel
     labeled_orphans, num_zones = label(orphan_mask)
 
-    orphan_points = []
-    for z in range(1, num_zones + 1):
-        cm = center_of_mass(orphan_mask, labeled_orphans, z)
-        orphan_points.append(apply_affine(affine, np.array(cm)))
-    orphan_points_world = np.array(orphan_points)
+    # One vectorised call over all labels, not one full-array scan per zone:
+    # center_of_mass accepts an index list and returns every centroid at once.
+    if num_zones > 0:
+        cms = center_of_mass(orphan_mask, labeled_orphans, index=range(1, num_zones + 1))
+        orphan_points_world = apply_affine(affine, np.array(cms))
+    else:
+        orphan_points_world = np.empty((0, 3))
     del orphan_mask, labeled_orphans
 
     if len(orphan_points_world) > 0:
@@ -330,7 +351,7 @@ def extract_graph(
                         edges_to_remove.append((u, v))
                 else:
                     edges_to_remove.append((u, v))
-            except:
+            except Exception:
                 edges_to_remove.append((u, v))
     G.remove_edges_from(edges_to_remove)
     del data  # not referenced again; remaining steps operate on the graph only
@@ -356,43 +377,17 @@ def extract_graph(
     # -------------------------------------------------------------------------
     # 6.6  PRUNE FALSE BRANCHES  (terminal hairs, physically agnostic)
     # -------------------------------------------------------------------------
-    min_branch_length_mm = 1.5
     print(f"  Pruning terminal branches < {min_branch_length_mm} mm...")
-
-    # Walks the whole chain from each endpoint to its nearest bifurcation
-    # and prunes it if the cumulative length is under threshold -- a
-    # per-edge check would miss multi-hop hairs. Uses node positions
-    # directly since edges have no 'weight' attribute yet (set in section 8).
-    def _euclid_weight(u, v, _d):
-        return np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
-
-    pruning = True
-    while pruning:
-        pruning = False
-        endpoints = [n for n, d in G.degree() if d == 1]
-        for ep in endpoints:
-            if ep not in G:
-                continue
-            try:
-                dist, path = nx.single_source_dijkstra(
-                    G, ep, cutoff=min_branch_length_mm, weight=_euclid_weight
-                )
-            except nx.NodeNotFound:
-                continue
-            bif_targets = [n for n in dist if n != ep and G.degree(n) >= 3]
-            if not bif_targets:
-                continue
-            nearest_bif = min(bif_targets, key=lambda n: dist[n])
-            chain = path[nearest_bif][:-1]  # exclude the bifurcation itself
-            G.remove_nodes_from(chain)
-            pruning = True
+    prune_terminal_hairs(G, min_branch_length_mm)
 
     # 6.7  CONTRACT LADDER RUNGS -- skeletonize() can produce a "ladder": two
-    # parallel skeleton lines cross-linked by tiny rungs. A rung's signature
-    # (unlike a real small anastomosis) is both endpoints already being
-    # branch points, nearly touching -- safe to auto-collapse.
+    # parallel skeleton lines cross-linked by tiny rungs, both endpoints
+    # already branch points and nearly touching -- safe to auto-collapse.
     max_rung_length_mm = 1.0
     print(f"  Contracting ladder rungs < {max_rung_length_mm} mm (branch-point-to-branch-point)...")
+
+    def _euclid_weight(u, v, _d=None):
+        return np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
 
     contracting = True
     while contracting:
@@ -400,7 +395,7 @@ def extract_graph(
         for u, v in list(G.edges()):
             if u not in G or v not in G:
                 continue
-            if G.degree(u) >= 3 and G.degree(v) >= 3 and _euclid_weight(u, v, None) < max_rung_length_mm:
+            if G.degree(u) >= 3 and G.degree(v) >= 3 and _euclid_weight(u, v) < max_rung_length_mm:
                 new_pos = (G.nodes[u]['pos'] + G.nodes[v]['pos']) / 2.0
                 new_radius = (G.nodes[u].get('radius', 0.5) + G.nodes[v].get('radius', 0.5)) / 2.0
                 nx.contracted_nodes(G, u, v, self_loops=False, copy=False)
@@ -422,7 +417,7 @@ def extract_graph(
     for u, v in G.edges():
         G[u][v]['weight'] = np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
 
-    # Temporary legacy map to prevent breaking Metric_extractor until rewritten
+    # Radii are also stored per-node; this flat map is what Metric_extractor reads.
     legacy_radius_map = {n: G.nodes[n]['radius'] for n in G.nodes()}
 
     package = {
@@ -474,8 +469,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--smooth_iters",   type=int,   default=2,
                         help="Laplacian smoothing iterations at the reference resolution "
-                             "(default: 2); scaled per-scan to keep physical smoothing "
-                             "radius comparable across resolutions.")
+                             "(default: 2); scaled per-scan by voxel spacing.")
     parser.add_argument("--smooth_alpha",   type=float, default=0.8,
                         help="Laplacian smoothing alpha (default: 0.8).")
     parser.add_argument("--smooth_reference_spacing", type=float, default=0.5,
@@ -488,10 +482,12 @@ if __name__ == "__main__":
     parser.add_argument("--merge_dist",     type=float, default=3.0,
                         help="Orphan merge distance threshold mm (default: 3.0).")
     parser.add_argument("--target_iso",     type=float, default=None,
-                        help="Target isotropic voxel spacing in mm. Default: auto -- "
-                             "uses this image's own finest native axis, so no axis is "
-                             "ever downsampled. Pass an explicit value to force a fixed "
-                             "common spacing across all images instead.")
+                        help="Target isotropic voxel spacing in mm (default: auto -- this "
+                             "image's finest native axis, so no axis is downsampled).")
+    parser.add_argument("--min_branch_len",  type=float, default=2.0,
+                        help="Prune terminal branches (leaf-to-bifurcation hairs) shorter than "
+                             "this many mm as skeletonization spurs (default: 2.0); raise to "
+                             "remove more hairs.")
 
     args = parser.parse_args()
 
@@ -505,7 +501,8 @@ if __name__ == "__main__":
             intensity_threshold=args.intensity_thresh,
             orphan_distance_threshold=args.orphan_dist,
             merge_distance=args.merge_dist,
-            target_iso_spacing=args.target_iso
+            target_iso_spacing=args.target_iso,
+            min_branch_length_mm=args.min_branch_len
         )
     except Exception as e:
         print(f"Error during graph extraction: {e}")

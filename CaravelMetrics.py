@@ -1,6 +1,7 @@
 import os
 import argparse
 import logging
+import sys
 from pathlib import Path
 from Atlas_Registration import process_registration
 from Graph_extractor import extract_graph
@@ -27,8 +28,8 @@ def main():
     parser.add_argument("--parcellation", default=None, help="Path to custom MNI parcellation (optional).")
     parser.add_argument("--label_map", default=None, help="Path to ArterialAtlasLables.txt for regional naming (optional).")
     parser.add_argument("--no_atlas", action="store_true",
-                        help="Skip atlas registration entirely. Graph extraction and metric "
-                             "computation still run, but without regional/atlas-based metrics.")
+                        help="Skip atlas registration; graph and metric steps still run, "
+                             "but without regional metrics.")
     
     # Preprocessing flags
     parser.add_argument("--preprocess_mra", action="store_true",
@@ -39,6 +40,11 @@ def main():
     # Skip skull-stripping if inputs are already stripped
     parser.add_argument("--mra_stripped", action="store_true", help="Flag if the input MRA is already skull-stripped.")
     parser.add_argument("--t1_stripped", action="store_true", help="Flag if the input T1 is already skull-stripped.")
+
+    # Graph extraction tuning
+    parser.add_argument("--min_branch_len", type=float, default=2.0,
+                        help="Prune terminal branches (leaf-to-bifurcation hairs) shorter than "
+                             "this many mm as skeletonization spurs (default: 2.0).")
 
     # QC reporting
     parser.add_argument("--html_qc", action="store_true",
@@ -119,7 +125,7 @@ def main():
             logger.info(f"Registration complete. Registered atlas saved to: {registered_atlas_path}")
         except Exception as e:
             logger.error(f"Pipeline failed during registration: {str(e)}")
-            return
+            sys.exit(1)
 
     # ---------------------------------------------------------
     # STEP 2: GRAPH EXTRACTION
@@ -127,31 +133,23 @@ def main():
     logger.info("--- STEP 2: VESSEL GRAPH EXTRACTION ---")
     try:
         graph_pkl_path = extract_graph(
-            nifti_path=args.mask, 
-            output_folder=subject_out_dir
+            nifti_path=args.mask,
+            output_folder=subject_out_dir,
+            min_branch_length_mm=args.min_branch_len
         )
         logger.info(f"Graph extraction complete. Data saved to: {graph_pkl_path}")
     except Exception as e:
         logger.error(f"Pipeline failed during graph extraction: {str(e)}")
-        return
+        sys.exit(1)
         
     # ---------------------------------------------------------
     # STEP 3: METRIC COMPUTATION
     # ---------------------------------------------------------
     logger.info("--- STEP 3: METRIC COMPUTATION ---")
     try:
-        metrics_to_compute = [
-            'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
-            'fractal_dimension', 'lacunarity', 'geodesic_length', 'avg_diameter',
-            'spline_arc_length', 'spline_chord_length', 'spline_mean_curvature',
-            'spline_mean_square_curvature', 'spline_rms_curvature', 'arc_over_chord',
-            'num_loops', 'num_abnormal_degree_nodes'
-        ]
-        
         extract_metrics(
             output_folder=subject_out_dir,
             graph_pkl_path=graph_pkl_path,
-            selected_metrics=metrics_to_compute,
             label_map_path=args.label_map,
             mask_path=args.mask,             # Passes the mask optionally for True Volume!
             registered_atlas_path=registered_atlas_path
@@ -159,7 +157,7 @@ def main():
         logger.info("Metric computation complete.")
     except Exception as e:
         logger.error(f"Pipeline failed during metric computation: {str(e)}")
-        return
+        sys.exit(1)
 
     # ---------------------------------------------------------
     # STEP 4: QC REPORT (optional)

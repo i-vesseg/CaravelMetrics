@@ -41,22 +41,15 @@ import numpy as np
 from Metric_extractor import (
     compute_metrics_for_mask,
     compute_tortuosity_metrics,
-    extract_segments_from_component_using_shortest_path,
+    extract_branch_segments,
+    compute_main_path,
     load_label_map,
     robust_graph_loader,
 )
 
-# The full metric list the pipeline runs with, so per-component numbers in the
-# report are identical to those in all_components_by_region.csv / global_summary.csv.
-QC_METRICS = [
-    'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
-    'fractal_dimension', 'lacunarity', 'geodesic_length', 'avg_diameter',
-    'spline_arc_length', 'spline_chord_length', 'spline_mean_curvature',
-    'spline_mean_square_curvature', 'spline_rms_curvature', 'arc_over_chord',
-    'num_loops', 'num_abnormal_degree_nodes',
-]
-
-ROOT_NAMES = ['Largest endpoint root', '2nd largest endpoint root', 'Largest bifurcation root']
+# The new definition has no roots: segments are unique branches between
+# consecutive junctions/endpoints, so there is a single bucket.
+ROOT_NAMES = ['Branch segments (unique)']
 
 
 # =========================================================================
@@ -84,7 +77,7 @@ def _js_literal(obj):
     Serialise the payload as a JavaScript object literal.
 
     Deliberately NOT strict JSON: curvature metrics are legitimately NaN for
-    short segments and arc_over_chord can be +Inf, both of which json.dumps
+    short segments and the tortuosity index can be +Inf, both of which json.dumps
     emits as bare NaN/Infinity tokens that JSON.parse() rejects but a JS
     literal accepts natively. Embedding as a literal keeps those values
     meaningful in the browser instead of forcing them to null.
@@ -231,7 +224,7 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
 
     # --- component-level metrics (identical code path to the CSV pipeline) ---
     print(f"  [QC] {subject}: computing component metrics ...")
-    comp_metrics = compute_metrics_for_mask(G, node_radius_map, QC_METRICS)
+    comp_metrics = compute_metrics_for_mask(G, node_radius_map)
 
     # --- segments -----------------------------------------------------------
     print(f"  [QC] {subject}: extracting segments ...")
@@ -241,68 +234,66 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
         Gc = G.subgraph(cnodes)
         cm = comp_metrics.get(cid, {})
 
-        seg_lists, seg_counts = extract_segments_from_component_using_shortest_path(
-            Gc, node_radius_map
-        )
+        # Unique branch decomposition: each anatomical branch appears once, so
+        # there are no roots and no trunk overlap. Everything is placed in a
+        # single bucket (index 0) so the existing report template renders it.
+        seg_list = extract_branch_segments(Gc)
 
         endpoints = [n for n in cnodes if G.degree(n) == 1]
         bifs = [n for n in cnodes if G.degree(n) >= 3]
-        # Reproduce the root choice so the report can flag degenerate cases:
-        # a component with <2 endpoints or no bifurcation collapses roots
-        # onto the same node, making those CSV columns duplicates.
-        roots = []
-        if endpoints:
-            sorted_eps = sorted(endpoints, key=lambda n: 2 * node_radius_map.get(n, 0.5), reverse=True)
-            r1 = sorted_eps[0]
-            r2 = sorted_eps[1] if len(sorted_eps) > 1 else r1
-            r3 = max(bifs, key=lambda n: 2 * node_radius_map.get(n, 0.5)) if bifs else r1
-            roots = [r1, r2, r3]
 
-        seg_ids_by_root = [[], [], []]
-        for r_idx, seg_list in enumerate(seg_lists):
-            if max_segments_per_root is not None and len(seg_list) > max_segments_per_root:
-                # Keep the longest ones -- the short ones are terminal twigs.
-                seg_list = sorted(
-                    seg_list,
-                    key=lambda s: sum(
-                        np.linalg.norm(G.nodes[s[i]]['pos'] - G.nodes[s[i + 1]]['pos'])
-                        for i in range(len(s) - 1)
-                    ),
-                    reverse=True,
-                )[:max_segments_per_root]
+        # The dominant-vessel path, shown as the "root" overlay for reference.
+        main_chain = compute_main_path(Gc, node_radius_map)
+        roots = [main_chain[0], main_chain[-1]] if main_chain else []
 
-            for seg in seg_list:
-                pts = np.array([G.nodes[n]['pos'] for n in seg], dtype=np.float64)
-                l_geo = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1))) if len(pts) > 1 else 0.0
-                counts_arr = np.array([seg_counts[r_idx].get(n, 1) for n in seg])
-                tort = compute_tortuosity_metrics(pts, smoothing=0, n_samples=500, counts=counts_arr)
-                avg_diam = float(np.mean([2 * node_radius_map.get(n, 0.5) for n in seg]))
+        if max_segments_per_root is not None and len(seg_list) > max_segments_per_root:
+            seg_list = sorted(
+                seg_list,
+                key=lambda s: sum(
+                    np.linalg.norm(G.nodes[s[i]]['pos'] - G.nodes[s[i + 1]]['pos'])
+                    for i in range(len(s) - 1)
+                ),
+                reverse=True,
+            )[:max_segments_per_root]
 
-                # How much of this segment is shared with its siblings from the
-                # same root -- the overlap that makes same-root segments
-                # statistically non-independent (see notes in the HTML).
-                shared = float(np.mean(counts_arr)) if len(counts_arr) else 1.0
+        seg_ids_by_root = [[]]
+        for seg in seg_list:
+            pts = np.array([G.nodes[n]['pos'] for n in seg], dtype=np.float64)
+            l_geo = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1))) if len(pts) > 1 else 0.0
+            chord = float(np.linalg.norm(pts[-1] - pts[0])) if len(pts) > 1 else 0.0
+            tort = compute_tortuosity_metrics(pts, smoothing=0, n_samples=500)
+            # Length-weighted mean diameter along the branch.
+            diam = np.array([2 * node_radius_map.get(n, 0.5) for n in seg], dtype=np.float64)
+            if len(pts) > 1:
+                seg_lens = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+                w = np.zeros(len(seg)); w[:-1] += seg_lens / 2.0; w[1:] += seg_lens / 2.0
+                avg_diam = float(np.average(diam, weights=w)) if w.sum() > 0 else float(diam.mean())
+            else:
+                avg_diam = float(diam.mean())
 
-                sid = len(segments)
-                seg_ids_by_root[r_idx].append(sid)
-                segments.append({
-                    'id': sid,
-                    'comp': cid,
-                    'root': r_idx,
-                    'nodes': [nid2idx[n] for n in seg],
-                    'n_nodes': len(seg),
-                    'geodesic_length': _f(l_geo),
-                    'avg_diameter': _f(avg_diam),
-                    'mean_shared_by': _f(shared, 2),
-                    'arc': _f(tort['spline_arc_length']),
-                    'chord': _f(tort['spline_chord_length']),
-                    'aoc': _f(tort['arc_over_chord']),
-                    'kappa': _f(tort['spline_mean_curvature'], 5),
-                    'kappa2': _f(tort['spline_mean_square_curvature'], 6),
-                    'rms_kappa': _f(tort['spline_rms_curvature'], 5),
-                })
+            sid = len(segments)
+            seg_ids_by_root[0].append(sid)
+            segments.append({
+                'id': sid,
+                'comp': cid,
+                'root': 0,
+                'nodes': [nid2idx[n] for n in seg],
+                'n_nodes': len(seg),
+                'geodesic_length': _f(l_geo),
+                'avg_diameter': _f(avg_diam),
+                # No overlap by construction -- every branch edge belongs to
+                # exactly one segment.
+                'mean_shared_by': 1.0,
+                'arc': _f(l_geo),
+                'chord': _f(chord),
+                'aoc': _f((l_geo / chord) if chord > 0 else float('inf')),
+                'kappa': _f(tort['spline_mean_curvature'], 5),
+                'kappa2': _f(tort['spline_mean_square_curvature'], 6),
+                'rms_kappa': _f(tort['spline_rms_curvature'], 5),
+            })
 
-        agg = cm.get('aggregated_tortuosity_by_root', [])
+        agg = cm.get('aggregated_tortuosity', {})
+        mp = cm.get('main_path_tortuosity', {})
         components.append({
             'cid': cid,
             'n_nodes': len(cnodes),
@@ -317,9 +308,12 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
             'num_loops': int(cm.get('num_loops', 0) or 0),
             'num_abnormal_degree_nodes': int(cm.get('num_abnormal_degree_nodes', 0) or 0),
             'roots': [nid2idx[r] for r in roots] if roots else [],
-            'root_collision': bool(roots) and (roots[0] == roots[1] or roots[0] == roots[2]),
-            'agg_curv': [_f(a.get('mean_curvature', np.nan), 5) for a in agg],
-            'agg_curv2': [_f(a.get('mean_square_curvature', np.nan), 6) for a in agg],
+            'root_collision': False,
+            'agg_curv': [_f(agg.get('mean_curvature', np.nan), 5)],
+            'agg_curv2': [_f(agg.get('mean_square_curvature', np.nan), 6)],
+            'main_curv': _f(mp.get('mean_curvature', np.nan), 5),
+            'main_curv2': _f(mp.get('mean_square_curvature', np.nan), 6),
+            'n_segments': len(seg_ids_by_root[0]),
             'segs_by_root': seg_ids_by_root,
         })
 
@@ -328,13 +322,16 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
     for e_i in range(len(edges)):
         a, b = int(eu[e_i]), int(ev[e_i])
         edge_key[(min(a, b), max(a, b))] = e_i
-    seg_mult = np.zeros((len(edges), 3), dtype=int)
+    # Single bucket now (root index 0). With unique branches every edge sits on
+    # exactly one segment, so this multiplicity map is 1 everywhere a branch
+    # runs -- the visible opposite of the old root-path overlap.
+    seg_mult = np.zeros((len(edges), 1), dtype=int)
     for s in segments:
         nds = s['nodes']
         for a, b in zip(nds[:-1], nds[1:]):
             e_i = edge_key.get((min(a, b), max(a, b)))
             if e_i is not None:
-                seg_mult[e_i, s['root']] += 1
+                seg_mult[e_i, 0] += 1
 
     # --- global aggregation (matches global_summary.csv arithmetic) ---------
     total_length = float(np.nansum([c['total_length'] for c in components]))
@@ -596,7 +593,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QC — __SUBJECT__</title>
+<title>QC (branch segments) — __SUBJECT__</title>
 __PLOTLY_JS__
 <style>
   :root {
@@ -660,6 +657,7 @@ __PLOTLY_JS__
 <body>
 <header>
   <h1>Vessel graph QC — <span style="color:var(--accent)">__SUBJECT__</span></h1>
+  <span style="background:#0f766e;color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:10px;letter-spacing:.03em">NEW · branch decomposition</span>
   <span class="meta" id="meta"></span>
 </header>
 
@@ -727,12 +725,12 @@ __PLOTLY_JS__
       <button id="onlyFlag">Flagged only</button>
     </div>
     <div class="scroll"><table id="segtable"><thead></thead><tbody></tbody></table></div>
-    <p class="note">Segments are weighted-shortest paths from the selected root out to every
-    endpoint of the component. They <b>overlap</b>: same-root segments share their proximal
-    trunk, so their curvature values are correlated rather than independent
-    (<code>shared</code> = mean number of same-root segments crossing each of this segment's
-    nodes). <code>a/c</code> = arc/chord tortuosity, <code>κ</code> = spline mean curvature
-    (1/mm), <code>κ²</code> = mean-square curvature.</p>
+    <p class="note">Segments are <b>unique branches</b> — the maximal centerline chain between two
+    consecutive junctions/endpoints (the VMTK / literature definition). They do <b>not</b> overlap:
+    every edge belongs to exactly one segment, so the branch lengths sum to the component's
+    total length and <code>shared</code> is 1 by construction. <code>a/c</code> = geodesic
+    path length / chord (tortuosity index), <code>κ</code> = spline mean curvature (1/mm),
+    <code>κ²</code> = mean-square curvature.</p>
   </div>
 
   <h2 style="margin-top:20px">Components</h2>
@@ -1047,7 +1045,7 @@ const cards = [
   ['Degree &gt;3 nodes', G.num_abnormal_degree_nodes, 'skeleton crossings'],
   ['Fractal dim.', fmt(G.fractal_dimension_largest,3), 'largest component'],
   ['Lacunarity', fmt(G.lacunarity_largest,3), 'largest component'],
-  ['Segments', G.n_segments, 'across all roots'],
+  ['Segments', G.n_segments, 'unique branches'],
 ];
 document.getElementById('cards').innerHTML = cards.map(
   c=>`<div class="card"><div class="lab">${c[0]}</div><div class="val">${c[1]}</div><div class="sub">${c[2]}</div></div>`
@@ -1055,7 +1053,7 @@ document.getElementById('cards').innerHTML = cards.map(
 
 /* ------------------------------------------------------------- selectors */
 const rootSel = document.getElementById('root');
-rootSel.innerHTML = D.root_names.map((n,i)=>`<option value="${i}">Root ${i+1} — ${n}</option>`).join('');
+rootSel.innerHTML = D.root_names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
 
 const compSel = document.getElementById('comp');
 const compsSorted = [...D.components].sort((a,b)=>(b.total_length||0)-(a.total_length||0));
@@ -1100,7 +1098,7 @@ if (!N.region) { [...document.querySelectorAll('#colorby option')]
 /* ---------------------------------------------------------- segment table */
 const SEG_COLS = [
   ['id','#',0], ['comp','comp',0], ['n_nodes','nodes',0], ['geodesic_length','length (mm)',2],
-  ['avg_diameter','Ø (mm)',2], ['arc','arc (mm)',2], ['chord','chord (mm)',2],
+  ['avg_diameter','Ø (mm)',2], ['chord','chord (mm)',2],
   ['aoc','a/c',3], ['kappa','κ (1/mm)',4], ['kappa2','κ²',5],
   ['rms_kappa','rms κ',4], ['mean_shared_by','shared',1],
 ];
@@ -1147,7 +1145,7 @@ function renderSegTable() {
   const total = currentSegIds().length;
   const where = S.comp === 'all' ? `all ${D.components.length} components` : `component ${S.comp}`;
   document.getElementById('segcount').textContent =
-    `— showing ${rows.length} of ${total} for ${where}, root ${S.root+1}`;
+    `— showing ${rows.length} of ${total} branches for ${where}`;
 }
 
 function renderSegInfo() {
@@ -1155,12 +1153,12 @@ function renderSegInfo() {
   if (S.selected===null) { el.textContent='Click a row in the table below.'; return; }
   const s = D.segments[S.selected];
   el.innerHTML =
-    `<b style="color:var(--accent)">Segment ${s.id}</b> · component ${s.comp} · root ${s.root+1}<br>` +
+    `<b style="color:var(--accent)">Branch ${s.id}</b> · component ${s.comp}<br>` +
     `${s.n_nodes} nodes · ${fmt(s.geodesic_length,2)} mm · Ø ${fmt(s.avg_diameter,2)} mm<br>` +
-    `arc ${fmt(s.arc,2)} / chord ${fmt(s.chord,2)} = <b>${fmt(s.aoc,3)}</b><br>` +
+    `path ${fmt(s.arc,2)} / chord ${fmt(s.chord,2)} = <b>${fmt(s.aoc,3)}</b><br>` +
     `κ ${fmt(s.kappa,4)} 1/mm · κ² ${fmt(s.kappa2,5)} · rms κ ${fmt(s.rms_kappa,4)}<br>` +
-    `<span style="color:var(--muted)">shared with ${fmt(s.mean_shared_by,1)} same-root segments on average</span>` +
-    (segFlagged(s) ? '<br><span style="color:var(--warn)">⚠ flagged: short segment or extreme arc/chord</span>' : '');
+    `<span style="color:var(--muted)">unique branch — no shared trunk</span>` +
+    (segFlagged(s) ? '<br><span style="color:var(--warn)">⚠ flagged: short segment or extreme path/chord</span>' : '');
 }
 
 document.getElementById('filter').oninput = e => { S.filter=e.target.value; renderSegTable(); };
@@ -1318,9 +1316,8 @@ if __name__ == "__main__":
                         help="ArterialAtlasLables.txt for region names.")
 
     parser.add_argument("--plotlyjs", choices=['directory', 'inline', 'cdn'], default='directory',
-                        help="How to ship plotly.js: 'directory' writes one shared plotly.min.js "
-                             "next to the reports (default, offline-safe and compact for a cohort); "
-                             "'inline' embeds ~4.9 MB in every file (fully standalone); "
+                        help="How to ship plotly.js: 'directory' (default) writes one shared file "
+                             "next to the reports; 'inline' embeds it in each file (~4.9 MB); "
                              "'cdn' needs internet.")
     parser.add_argument("--mesh_faces", type=int, default=45000,
                         help="Target triangle count for the decimated mask surface (default: 45000).")
