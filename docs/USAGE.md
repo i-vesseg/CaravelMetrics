@@ -26,18 +26,23 @@ call each stage on its own (see [Running individual stages](#running-individual-
 | 3 | Metric computation | `Metric_extractor.py` | graph (+atlas, +mask) → metric CSVs |
 | 4 | QC report *(optional)* | `QC_report.py` | graph (+mask, +atlas) → interactive HTML |
 
-Stage 1 (and its FSL dependency) is only needed for **regional** metrics. Without an atlas, stages
-2–3 still give you whole-graph metrics for any binary vessel mask, any anatomy or modality.
+Stages 2–3 are the **core**: they give whole-graph metrics for any binary vessel mask, any anatomy
+or modality, with no atlas and no FSL. Stage 1 is an **optional layer** -- it's only needed to add
+the per-territory (regional) breakdown, and it's the only part that requires an MRA and FSL.
 
 
 
 ## Running the full pipeline
 
-`CaravelMetrics.py` is the single-command entry point: given a subject's MRA + vessel mask (+
-optional T1), it runs registration, graph extraction, and metric computation in one call -- plus
-the HTML QC report with `--html_qc`. Use `--no_atlas` to skip registration.
+`CaravelMetrics.py` runs the core pipeline for one subject in a single call: **mask → graph →
+metrics**, producing whole-graph morphometrics. The arterial atlas is an **optional layer on
+top** -- when enabled, it additionally reports the same metrics broken down per vascular territory
+(regional analysis). The atlas layer is the only part that requires an MRA and FSL.
 
-### With atlas (regional analysis)
+Note that the atlas layer runs **by default**: it is disabled with `--no_atlas`, rather than
+enabled with an opt-in flag. The `--html_qc` report and QC snapshots are optional in both cases.
+
+### Core + atlas layer — regional analysis (default)
 
 ```bash
 python CaravelMetrics.py \
@@ -49,16 +54,16 @@ python CaravelMetrics.py \
   --html_qc --registration_snapshot
 ```
 
-If your T1/MRA aren't already skull-stripped, drop `--mra_stripped`/`--t1_stripped` (BET +
-`robustfov` run automatically). If you have no T1 at all, drop `--t1`: registration falls back to
+If the T1/MRA are not already skull-stripped, omit `--mra_stripped`/`--t1_stripped` (BET +
+`robustfov` run automatically). If no T1 is available, omit `--t1`: registration falls back to
 warping the MNI template directly onto the MRA. The two QC outputs are independent: `--html_qc`
 writes the interactive HTML graph report, `--registration_snapshot` writes a PNG snapshot of the
 registered atlas labels -- pass either, both, or neither.
 
-### Without atlas (whole-graph only)
+### Core only — whole-graph metrics (`--no_atlas`)
 
-Pass `--no_atlas` to skip registration -- and the FSL dependency it requires -- while still
-running graph extraction and metric computation in one call:
+Add `--no_atlas` to skip the atlas layer -- and the FSL dependency it needs -- leaving just the
+graph and metric steps:
 
 ```bash
 python CaravelMetrics.py \
@@ -68,9 +73,9 @@ python CaravelMetrics.py \
   --no_atlas
 ```
 
-`--image` is still required (it names the subject's output folder), but no atlas/T1 arguments are
-read. Metrics land in the same subject folder, just without the regional breakdown -- see
-[Output](#output).
+This produces the same metrics, without the per-territory breakdown -- see [Output](#output).
+`--image` is still required here (it names the subject's output folder), but no atlas/T1 arguments
+are read; if no MRA is available at all, run [the stages individually](#chaining-stages-by-hand) instead.
 
 ### All arguments
 
@@ -121,15 +126,15 @@ options:
 
 ## Running individual stages
 
-Each stage can be run on its own. Run them in order (1 → 2 → 3, plus 4 for QC), or skip straight
-to the stage you need if you already have its input -- e.g. jump to stage 3 if you already have a
-graph. Every stage is also importable as a plain Python function (see [Python API](#python-api)).
+Each stage can be run on its own. Run them in order (1 → 2 → 3, plus 4 for QC), or skip directly
+to the stage you need if its input already exists -- for example, start at stage 3 if you already
+have a graph. Every stage is also importable as a Python function (see [Python API](#python-api)).
 
 For each stage below: the **most basic command** first, then the full `--help`.
 
 ### Stage 1 — Atlas registration *(optional, brain MRA)*
 
-Warps the arterial atlas into the subject's MRA space. Needs FSL. Useful on its own for
+Warps the arterial atlas into the subject's MRA space. Requires FSL. Useful on its own for
 pre-computing atlases for a cohort ahead of a batch graph/metrics run.
 
 ```bash
@@ -169,7 +174,7 @@ options:
 
 ### Stage 2 — Graph extraction
 
-Turns a binary vessel mask into a vessel graph (`.pkl` + `.vtp`). No FSL, no atlas, not
+Converts a binary vessel mask into a vessel graph (`.pkl` + `.vtp`). No FSL, no atlas, not
 brain-specific -- works for any binary vessel mask (TOF-MRA, CTA, ...).
 
 ```bash
@@ -313,9 +318,8 @@ options:
 
 ### Chaining stages by hand
 
-Chaining stages 2 → 3 is exactly what `--no_atlas` does internally, minus registration. This is the
-way to go if you don't have an MRA/reference image at all, or you're working from a mask produced
-elsewhere:
+Chaining stages 2 → 3 is exactly what `--no_atlas` does internally, minus registration. Use this
+when no MRA/reference image is available, or when working from a mask produced elsewhere:
 
 ```bash
 python Graph_extractor.py \
@@ -330,10 +334,10 @@ python Metric_extractor.py \
 
 ### Already have a graph
 
-You can skip graph extraction too. `Metric_extractor` reads more than Caravel's own pickle:
+Graph extraction can be skipped as well. `Metric_extractor` reads more than Caravel's own pickle:
 `robust_graph_loader` auto-detects a raw NetworkX graph, a UNC Skwerer/Bullitt tree dictionary, or
-a MetaIO/TubeTK `.tre` scene, so any of these work as `--graph` directly. This is the path for
-structures from other vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
+a MetaIO/TubeTK `.tre` scene, so any of these work as `--graph` directly. This supports structures
+from other vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
 
 ```bash
 python Metric_extractor.py --graph my_vessel_tree.pkl --out_dir results/
@@ -342,7 +346,7 @@ python Metric_extractor.py --graph my_vessel_tree.tre --out_dir results/
 
 ### Python API
 
-Every stage is a plain function, so you can wire the pipeline into your own scripts.
+Every stage is a plain function, so the pipeline can be embedded directly in your own scripts.
 
 ```python
 from Atlas_Registration import process_registration
@@ -370,20 +374,20 @@ extract_metrics(
 )
 ```
 
-`extract_metrics` always computes the full metric set; there is no metric-selection argument. Drop
-`registered_atlas_path` for whole-graph-only metrics, and `mask_path` if you don't need the exact
-voxel-counted volume.
+`extract_metrics` always computes the full metric set; there is no metric-selection argument. Omit
+`registered_atlas_path` for whole-graph-only metrics, and `mask_path` when the exact voxel-counted
+volume is not required.
 
 
 
 ## Output
 
-**With atlas**, `results/subject001_MRA/` contains the registered/dilated atlas, the vessel graph
+**With the atlas layer**, `results/subject001_MRA/` contains the registered/dilated atlas, the vessel graph
 (`.pkl` + `.vtp`), `subject001_MRA_global_summary.csv` (whole-graph metrics),
 `subject001_MRA_region_summary.csv` + `subject001_MRA_all_components_by_region.csv`
 (per-territory), plus the two independent QC outputs (`--html_qc`, `--registration_snapshot`) --
-every file is prefixed with the subject name, so nothing collides if you ever gather several
-subjects' folders into one place:
+every file is prefixed with the subject name, so files do not collide when several subjects'
+folders are gathered into one place:
 
 ```
 results/
@@ -407,14 +411,13 @@ to put it somewhere else instead (e.g. a shared `QC/` folder across subjects for
 PNG snapshot is always written next to the registration outputs, since it's generated as part of
 that step.
 
-**Without atlas** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain),
-there's no per-territory breakdown and no `global_summary.csv` -- metrics go straight into
-`output_folder` (the same folder you passed in) as `region_summary.csv` (with a single `global`
-pseudo-region) + `all_components_by_region.csv`, both still prefixed with the subject name. This is
-`extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies the same
-way whether you ran `CaravelMetrics.py --no_atlas` or the individual stages yourself.
-`--registration_snapshot` has no effect with `--no_atlas`, since there's no registration step to
-snapshot.
+**Core only** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain)
+produces no per-territory breakdown and no `global_summary.csv`. Metrics are written directly into
+`output_folder` as `region_summary.csv` (with a single `global` pseudo-region) +
+`all_components_by_region.csv`, both still prefixed with the subject name. This is
+`extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies whether the
+run used `CaravelMetrics.py --no_atlas` or the individual stages. `--registration_snapshot` has no
+effect with `--no_atlas`, as there is no registration step to snapshot.
 
 
 
