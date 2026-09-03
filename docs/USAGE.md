@@ -230,7 +230,12 @@ options:
 
 Computes morphometrics from a graph. Pass `--atlas` (a registered atlas from stage 1) for the
 regional breakdown; pass `--mask` for exact voxel-counted volume. Both optional -- with neither,
-you get whole-graph metrics only.
+the output is whole-graph metrics only.
+
+`--graph` accepts more than Caravel's own `.pkl`: `robust_graph_loader` also reads a raw NetworkX
+graph, a UNC Skwerer/Bullitt tree dictionary, or a MetaIO/TubeTK `.tre` scene. Graphs from other
+vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`) can therefore be analysed
+directly, without running stages 1–2.
 
 ```bash
 python Metric_extractor.py \
@@ -330,18 +335,6 @@ python Metric_extractor.py \
   --graph results/subject001_vessel_mask_vessel_data.pkl \
   --out_dir results/ \
   --mask subject001_vessel_mask.nii.gz
-```
-
-### Already have a graph
-
-Graph extraction can be skipped as well. `Metric_extractor` reads more than Caravel's own pickle:
-`robust_graph_loader` auto-detects a raw NetworkX graph, a UNC Skwerer/Bullitt tree dictionary, or
-a MetaIO/TubeTK `.tre` scene, so any of these work as `--graph` directly. This supports structures
-from other vessel-extraction tools (e.g. a coronary artery tree exported as `.tre`):
-
-```bash
-python Metric_extractor.py --graph my_vessel_tree.pkl --out_dir results/
-python Metric_extractor.py --graph my_vessel_tree.tre --out_dir results/
 ```
 
 ### Python API
