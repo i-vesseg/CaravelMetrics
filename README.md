@@ -1,5 +1,9 @@
 # Caravel-Metrics
 
+This branch contains an updated version of the original CaravelMetrics framework. For detailed instructions on how to run it, check [docs/USAGE.md](docs/USAGE.md).
+
+Differences with the original branch are detailed below.
+
 <!-- Logo/Banner Image -->
 <p align="center">
   <img src="logos/CaravelMetrics_LOGO.png" alt="CaravelMetrics Logo" width="300"/>
@@ -29,19 +33,52 @@ Understanding cerebrovascular morphology is critical for detecting disease and d
 
 ### Key Capabilities
 
-- **Modular Architecture**: Three independent processing modules (Atlas Registration, Graph Extraction, Metric Computation)
-- **Batch Processing**: Automated multi-subject pipeline with parallel execution
-- **Automated Graph Construction**: Converts vessel segmentation masks to mathematical graph representations via skeletonization
-- **Multi-Scale Feature Extraction**: Computes 15 complementary features across four categories
-- **Dual Analysis Modes**: Supports both whole-brain and atlas-based regional analysis
-- **Regional Analysis**: Integrates arterial atlas for territory-specific measurements across 30 brain regions
+- **Modular Architecture**: Four independent processing stages (Atlas Registration, Graph Extraction, Metric Computation, Interactive Quality Control)
+- **Interactive 3D Quality Control**: Visual inspection of vessel graphs and segmentation surfaces with dynamic filtering and summary statistics
+- **Batch & Single-Subject Processing**: Pipelines for single scans or cohort execution
+- **Automated Graph Construction**: Converts vessel segmentation masks to graph representations via skeletonization
+- **Multi-Scale Feature Extraction**: Computes 15 complementary features across four categories (morphometric, topological, geometric, fractal)
+- **Dual Analysis Modes**: Whole-brain and atlas-based regional analysis across 30 brain territories
 - **Population-Level Studies**: Validated on 570 subjects (ages 20-86) from the IXI dataset
-- **Reproducible Pipeline**: End-to-end automation from segmentation masks to statistical analysis
-- **Advanced Graph Processing**: Geodesic distance computation, orphan node handling, artifact removal
+- **Reproducible & Extensible**: Automation from raw masks to statistical analysis, with support for external graph formats
 
 ---
 
-## � Quick Start
+## 🆕 What's New
+
+Main changes compared to the original CaravelMetrics release:
+
+### 1. Interactive 3D Quality Control (QC) Reports (`QC_report.py`)
+- **Interactive 3D visualization**: Self-contained HTML reports displaying 3D vessel skeletons overlaid with segmentation surfaces.
+- **Metric dashboard**: Summary statistics for the whole graph and individual segments.
+- **Batch mode**: Supports generating reports for single subjects or entire cohorts.
+
+<p align="center">
+  <img src="docs/images/qc_report_preview.gif" alt="Interactive 3D QC Report Preview" width="850"/>
+</p>
+
+### 2. Unique Branch Segment Decomposition
+- **Segment decomposition**: Shifted from root-path overlapping segments to clean, non-overlapping **unique branch segments** (bifurcation-to-bifurcation, bifurcation-to-endpoint, endpoint-to-endpoint).
+- **Exact metric alignment**: Eliminates statistical double-counting and bias in segment-level morphometrics (length, curvature, tortuosity), ensuring consistency between CSV outputs and QC reports.
+
+### 3. Graph Extraction & Preprocessing (`Graph_extractor.py`)
+- **Hole-filling**: Automatically fills internal segmentation cavities prior to skeletonization, preventing artificial loops.
+- **Isotropic resampling**: Ensures uniform physical voxel spacing and consistent geometric measurements across scans.
+- **Spur pruning**: Prunes terminal branch hairs (`--min_branch_len`, default 2.0 mm) created by skeletonization noise without eroding small vessels.
+
+### 4. Volume Computation & Universal Graph Input Support (`Metric_extractor.py`)
+- **Exact voxel-counted volume**: Computes true regional volumes directly from the binary mask (`--mask`), or uses a truncated cone (conical frustum) approximation along graph edges instead of a simple cylinder.
+- **Graph loader**: Native support for external graph formats, including NetworkX `.pkl`, UNC trees, and MetaIO / TubeTK `.tre` files.
+
+### 5. Multi-Modal Registration (`Atlas_Registration.py`)
+- **Redesigned registration pipeline**: Replaced the original binary mask to MRA registration with an intensity-based approach (registering subject T1 to MRA and MNI template to T1, or direct MNI-to-MRA template warping).
+- **Direct FSL execution**: Removed Nipype overhead, running FSL directly via subprocess with optional 2D multi-slice QC snapshots (`--registration_snapshot`).
+- **Optional T1 modality**: Supports dual-modality registration (MRA + T1) when available, or falls back to direct MNI-to-MRA registration.
+- **Preprocessing controls**: Integrated ANTs denoising and N4 bias correction flags (`--preprocess_mra`, `--preprocess_t1`) and pre-stripped input options (`--mra_stripped`, `--t1_stripped`).
+
+---
+
+## 🚀 Quick Start
 
 ```bash
 # 1. Clone and install
@@ -49,16 +86,33 @@ git clone https://github.com/i-vesseg/CaravelMetrics.git
 cd CaravelMetrics
 pip install -r requirements.txt
 
-# 2. Configure your data paths in CaravelMetrics.py
-# Edit: segmentation_folder, image_folder, output_base_folder, use_atlas
+# 2. Run the full pipeline (core graph extraction + regional atlas + interactive QC)
+python CaravelMetrics.py \
+  --image subject001_MRA.nii.gz \
+  --mask  subject001_vessel_mask.nii.gz \
+  --t1    subject001_T1.nii.gz \
+  --output_dir results/ \
+  --html_qc
 
-# 3. Run the pipeline
-python CaravelMetrics.py
+# 3. Or run the core pipeline only (whole-graph metrics, no atlas / no FSL required)
+python CaravelMetrics.py \
+  --image subject001_MRA.nii.gz \
+  --mask  subject001_vessel_mask.nii.gz \
+  --output_dir results/ \
+  --no_atlas
 
-# The pipeline will automatically process all subjects in your data folders
+# 4. Extract graph only
+python Graph_extractor.py \
+  --mask subject001_vessel_mask.nii.gz \
+  --output_dir results/
+
+# 5. Compute metrics only
+python Metric_extractor.py \
+  --graph results/subject001_vessel_mask_vessel_data.pkl \
+  --out_dir results/
 ```
 
-For detailed configuration options and advanced usage, see the [Usage Guide](docs/USAGE.md).
+For detailed instructions, command-line arguments, running individual stages, and batch scripts, see **[docs/USAGE.md](docs/USAGE.md)**.
 
 ---
 
@@ -66,11 +120,11 @@ For detailed configuration options and advanced usage, see the [Usage Guide](doc
 
 **Full documentation and usage examples are available in [`docs/`](docs/)**
 
+- **[Usage Guide](docs/USAGE.md)** - Comprehensive guide to end-to-end execution, individual stages, and batch scripts
 - **[Pipeline Overview](docs/PIPELINE.md)** - Processing steps and modular architecture
-- **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions
-- **[Usage Guide](docs/USAGE.md)** - Configuration and batch processing examples
-- **[Features Documentation](docs/FEATURES.md)** - Detailed feature definitions
-- **[Analysis Guide](docs/ANALYSIS.md)** - Statistical analysis and visualization
+- **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions and prerequisites
+- **[Features Documentation](docs/FEATURES.md)** - Detailed feature definitions and mathematical formulation
+- **[Analysis Guide](docs/ANALYSIS.md)** - Statistical analysis and population-level workflows
 
 ---
 
@@ -96,7 +150,7 @@ This work is co-funded by:
 ### Data and Resources
 
 - **IXI Dataset**: https://brain-development.org/ixi-dataset/
-- **Arterial Atlas**: Liu et al., Scientific Data (2023) - https://doi.org/10.1038/s41597-023-01967-w
+- **Arterial Atlas**: Liu et al., Scientific Data (2023) - https://doi.org/10.1038/s41597-022-01923-0
 - **VesselVerse**: [Falcetta et al., MICCAI (2025)](https://papers.miccai.org/miccai-2025/paper/0087_paper.pdf) - Vessel segmentation resource. [(Official Website)](https://i-vesseg.github.io/vesselverse/)
 
 ---
@@ -116,6 +170,7 @@ This work is co-funded by:
 
 - **Bogdan Ion** - Data Science Department, EURECOM
 - **Duccio Lalli** - Double Degree MSc Student in Data Science and Engineering at Politecnico di Torino & EURECOM
+- **Mattia Cazzolla** - Data Science Department, EURECOM
 
 ---
 
