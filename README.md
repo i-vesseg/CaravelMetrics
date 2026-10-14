@@ -96,7 +96,7 @@ This work is co-funded by:
 ### Data and Resources
 
 - **IXI Dataset**: https://brain-development.org/ixi-dataset/
-- **Arterial Atlas**: Liu et al., Scientific Data (2023) - https://doi.org/10.1038/s41597-023-01967-w
+- **Arterial Atlas**: Liu et al., Scientific Data (2023) - https://doi.org/10.1038/s41597-022-01923-0
 - **VesselVerse**: [Falcetta et al., MICCAI (2025)](https://papers.miccai.org/miccai-2025/paper/0087_paper.pdf) - Vessel segmentation resource. [(Official Website)](https://i-vesseg.github.io/vesselverse/)
 
 ---
