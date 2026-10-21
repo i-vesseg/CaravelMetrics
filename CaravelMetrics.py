@@ -45,6 +45,19 @@ def main():
     parser.add_argument("--min_branch_len", type=float, default=2.0,
                         help="Prune terminal branches (leaf-to-bifurcation hairs) shorter than "
                              "this many mm as skeletonization spurs (default: 2.0).")
+    parser.add_argument("--target_iso", type=float, default=None,
+                        help="Isotropic spacing (mm) to resample every mask to (default: each "
+                             "scan's finest axis). Set one value for a whole cohort so all "
+                             "subjects are processed on the same grid. Note: it cannot undo "
+                             "acquisition differences -- bifurcation counts still change "
+                             "with scan resolution.")
+    parser.add_argument("--no_extend_tips", action="store_true",
+                        help="Do not extend skeleton tips that stop short of their vessel end (on by default).")
+    parser.add_argument("--mask_smoothing", type=float, default=0.0,
+                        help="Gaussian smoothing (mm) of the mask boundary before "
+                             "skeletonisation, for noisy segmentations only (default: 0 = off; "
+                             "0.25 validated; raised to at least 0.7 voxel; erodes vessels thinner "
+                             "than ~1 voxel).")
 
     # QC reporting
     parser.add_argument("--html_qc", action="store_true",
@@ -110,7 +123,7 @@ def main():
     else:
         logger.info("--- STEP 1: ATLAS REGISTRATION ---")
         try:
-            registered_atlas_path, inv_matrix_path = process_registration(
+            registered_atlas_path, _ = process_registration(
                 image_path=args.image,
                 output_dir=subject_out_dir,
                 mni_parcellation=args.parcellation,
@@ -135,7 +148,10 @@ def main():
         graph_pkl_path = extract_graph(
             nifti_path=args.mask,
             output_folder=subject_out_dir,
-            min_branch_length_mm=args.min_branch_len
+            min_branch_length_mm=args.min_branch_len,
+            target_iso_spacing=args.target_iso,
+            mask_smoothing_mm=args.mask_smoothing,
+            extend_tips=not args.no_extend_tips
         )
         logger.info(f"Graph extraction complete. Data saved to: {graph_pkl_path}")
     except Exception as e:

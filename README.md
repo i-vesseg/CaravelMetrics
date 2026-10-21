@@ -37,7 +37,7 @@ Understanding cerebrovascular morphology is critical for detecting disease and d
 - **Interactive 3D Quality Control**: Visual inspection of vessel graphs and segmentation surfaces with dynamic filtering and summary statistics
 - **Batch & Single-Subject Processing**: Pipelines for single scans or cohort execution
 - **Automated Graph Construction**: Converts vessel segmentation masks to graph representations via skeletonization
-- **Multi-Scale Feature Extraction**: Computes 15 complementary features across four categories (morphometric, topological, geometric, fractal)
+- **Multi-Scale Feature Extraction**: Morphometric, topological, geometric and fractal features per component, segment, junction and atlas region (see [FEATURES.md](docs/FEATURES.md))
 - **Dual Analysis Modes**: Whole-brain and atlas-based regional analysis across 30 brain territories
 - **Population-Level Studies**: Validated on 570 subjects (ages 20-86) from the IXI dataset
 - **Reproducible & Extensible**: Automation from raw masks to statistical analysis, with support for external graph formats

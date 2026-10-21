@@ -41,49 +41,50 @@ The pipeline consists of three main modules that can run independently or as par
 
 #### Module 2: Graph Extraction (`Graph_extractor.py`)
 **Executed for all modes**
-1. **Mesh Generation**: Create surface mesh from vessel mask for geodesic distance computation
-2. **Skeletonization**: Apply 3D morphological thinning to reduce vessel mask to centerlines
-3. **Node Detection**: Identify branch points using 26-connectivity neighborhood analysis:
-   - Endpoints (degree = 1)
-   - Bifurcations (degree = 3)
-   - Abnormal nodes (degree > 3, potential artifacts)
-4. **Graph Construction**: Build NetworkX graph with:
-   - Nodes: Branch points with 3D spatial coordinates
-   - Edges: Vessel segments with Euclidean distance weights
-   - Node attributes: Position, degree, multiplicity
-5. **Orphan Node Handling**: Connect isolated branches within distance threshold
-6. **Triangle Removal**: Clean discretization artifacts by removing spurious 3-node loops
-7. **Laplacian Smoothing**: Apply iterative smoothing to node positions
-8. **Geodesic Distance**: Compute mesh-based geodesic distances for tortuosity analysis
-9. **Output**: Serialized graph structure (PKL) and VTK visualization file
+1. **Load and crop**: binarise the mask and crop it to its bounding box (+5 mm margin)
+2. **Fill holes**: fill internal cavities (`binary_fill_holes`)
+3. **Isotropic resampling**: resample to the finest native axis, or to `--target_iso` (signed-distance interpolation)
+4. **Optional boundary smoothing** (`--mask_smoothing`, off by default; for noisy segmentations only; sigma at least 0.7 voxel)
+5. **Surface mesh**: isosurface used by the edge check below
+6. **Skeletonisation**: 3D thinning (scikit-image); nodes = skeleton voxels, edges = 26-neighbours
+7. **Triangle collapse**: remove the longest edge of every 3-node clique (junction clean-up)
+8. **Edge check**: an edge whose straight line leaves the mask is cut if the path along the vessel surface between its ends is more than twice the edge length (separates touching vessels)
+9. **Small components**: drop components shorter than 3.5 mm
+10. **Terminal pruning**: remove leaf-to-junction branches shorter than `--min_branch_len` (2 mm)
+11. **Tip extension**: extend skeleton tips that stop short of their vessel end (on by default; `--no_extend_tips`)
+12. **Rung contraction**: merge junctions less than 1 mm apart
+13. **Laplacian smoothing** of node positions (dose scaled with voxel size)
+14. **Radius**: equivalent-cylinder radius from the local mask volume (EDT value kept as `radius_edt`)
+15. **Output**: graph (`.pkl`, with parameters, code version and QC), VTP files, `*_graph_qc.json`
 
-#### Module 3: Metric Extraction (`Metric_extractor.py`)
+#### Module 3: Metric Extraction (`Metric_extractor.py`, `Branch_metrics.py`)
 **Executed for all modes**
-1. **Input Loading**: Load graph structure and optional registered atlas
-2. **Regional Segmentation** (atlas mode only): Partition graph nodes by atlas labels
-3. **Connected Component Analysis**: Identify separate vessel networks per region
-4. **Component Ranking**: Sort components by size (number of edges)
-5. **Segment Extraction**: For each component:
-   - Find all endpoints
-   - Compute shortest paths between endpoint pairs
-   - Extract individual vessel segments with path multiplicity tracking
-6. **Metric Computation**: For each selected metric:
-   - **Morphometric**: Total length, volume, diameter
-   - **Topological**: Bifurcation count/density, loops, abnormal nodes
-   - **Fractal**: Box-counting dimension, lacunarity
-   - **Geometric**: Arc-length parameterized tortuosity metrics with multiplicity weighting
-7. **Aggregation**: Combine metrics across components within each region
-8. **Output**: CSV files with component-level and region-level metrics
+1. **Input loading**: Caravel `.pkl`, raw NetworkX graph, UNC tree dictionary or TubeTK `.tre`
+2. **Regional split** (atlas mode only): each node goes to the atlas region it lies in (vessels are cut at region borders)
+3. **Per connected component**: length, volume, bifurcations, loops, segments, fractal dimension, lacunarity
+4. **Per segment**: length, arc/chord, diameter, smoothing-spline curvature
+5. **Per junction**: branching angles; junctions whose daughters rejoin within a short loop are flagged and left out of the median
+6. **Aggregation**: sums, length-weighted means, and medians pooled over segments/junctions, per region and for the whole network; FD and lacunarity on each region's whole network
+7. **Output**: component, region, segment and bifurcation CSVs, a QC table with flags, and a run-info file
 
-### Batch Processing Workflow
+### Processing several subjects
 
-The main `CaravelMetrics.py` script orchestrates the three modules:
+`CaravelMetrics.py` processes one subject per call (registration, graph
+extraction, metrics, optional QC report). For a cohort, loop over subjects,
+e.g. with masks named `<subject>_mask.nii.gz` next to `<subject>_MRA.nii.gz`:
 
-1. **Discovery**: Scan segmentation folder for all `.nii`/`.nii.gz` files
-2. **File Matching**: Match vessel masks with corresponding images and T1 scans
-3. **Parallel Execution**: Process multiple subjects simultaneously (configurable workers)
-4. **Progress Tracking**: Display progress bars and log detailed execution information
-5. **Error Handling**: Gracefully handle failures, continue processing remaining subjects
-6. **Summary Report**: Generate success/failure statistics at completion
+```bash
+for m in data/*_mask.nii.gz; do
+  s=$(basename "$m" _mask.nii.gz)
+  python CaravelMetrics.py -i "data/${s}_MRA.nii.gz" -m "$m" -o "results/$s" \
+    || echo "$s failed" >> results/failed.txt
+done
+```
+
+Each subject's folder then holds its summary, segment, bifurcation and QC
+tables (`*_region_summary.csv`, `*_segments.csv`, `*_bifurcations.csv`,
+`*_qc.csv`) and `*_run_info.json` with the code version and settings; for a
+cohort table concatenate the `*_region_summary.csv` files. Use one
+`--target_iso` for the whole cohort when scans differ in resolution.
 
 ---

@@ -6,7 +6,7 @@ import nibabel as nib
 import numpy as np
 import networkx as nx
 from skimage.morphology import skeletonize
-from scipy.ndimage import distance_transform_edt, label, center_of_mass, map_coordinates, binary_fill_holes, zoom
+from scipy.ndimage import distance_transform_edt, map_coordinates, binary_fill_holes, zoom
 from scipy.spatial import cKDTree
 from nibabel.affines import apply_affine
 
@@ -119,6 +119,363 @@ def resample_to_isotropic(data, affine, voxel_sizes, target_spacing=0.5):
     return resampled, new_affine, new_voxel_sizes
 
 
+# Minimum smoothing sigma in voxels. Boundary-voxel noise is a voxel-scale
+# feature: below ~0.7 voxel the Gaussian leaves single flipped voxels in place
+# (0.25 mm on 0.6-0.7 mm voxels changed nothing, even on noisy masks), while
+# 0.7 voxel fixed noisy phantom trees on 0.42, 0.6 and 0.7 mm grids.
+MIN_MASK_SMOOTHING_VOX = 0.7
+
+
+def effective_mask_smoothing(sigma_mm, voxel_sizes):
+    """Sigma actually applied: the requested one, but at least
+    MIN_MASK_SMOOTHING_VOX voxels (0 stays 0 = off)."""
+    if not sigma_mm or sigma_mm <= 0:
+        return 0.0
+    return float(max(sigma_mm, MIN_MASK_SMOOTHING_VOX * float(np.min(voxel_sizes))))
+
+
+def smooth_mask(data, voxel_sizes, sigma_mm):
+    """Gaussian-smooth the signed distance (mm) of a binary mask and
+    re-threshold at 0. extract_graph passes effective_mask_smoothing().
+
+    For NOISY segmentations only (off by default). Validated on
+    phantoms and test masks: with sigma = 0.25 mm, a phantom
+    tree with 10-20 % of its boundary voxels flipped goes from 25-50
+    bifurcations back to the true 7, and a noisy coronary mask from +23 %
+    length to +1 %. The cost: vessels thinner than about one voxel are eroded
+    (a 0.35 mm-radius tube keeps 30 % of its length, 0.45 mm keeps 82 %), and a
+    clean brain TOF mask loses 3 % of its length. sigma = 0.5 mm erases small
+    vessels entirely. Clean (e.g. nnU-Net) masks do not need it."""
+    from scipy.ndimage import gaussian_filter
+    vs = np.asarray(voxel_sizes, float)
+    m = data > 0.5
+    sdf = (distance_transform_edt(m, sampling=vs) - distance_transform_edt(~m, sampling=vs)).astype(np.float32)
+    sdf = gaussian_filter(sdf, sigma=sigma_mm / vs)
+    return (sdf > 0).astype(np.float32)
+
+
+def equivalent_cylinder_radii(G, mask_points_world, voxel_volume, edt_radius,
+                              max_factor=1.6, window=5):
+    """Per-node radius r_i = sqrt(V_i / (pi * l_i)) -- the radius of the
+    cylinder that has the node's share of the mask volume.
+
+    V_i: volume of the mask voxels whose nearest graph node is i, counting
+         only voxels within max_factor * EDT radius + 1 voxel of the node so
+         that eroded skeleton tips do not absorb the surrounding mask.
+    l_i: half the summed length of the node's incident edges.
+
+    The EDT value at the skeleton voxel underestimates the radius by ~10%
+    (the voxel sits off the true axis, and EDT measures to background voxel
+    centres); this estimator is unbiased on phantoms.
+    Per-node Voronoi cells are thin slices, so the raw value is
+    median-filtered over the degree-2 nodes within window//2 hops. Falls back
+    to the EDT radius where no volume or length is available. A tuple of
+    windows returns one map per window.
+    """
+    nodes = list(G.nodes())
+    windows = window if isinstance(window, (tuple, list)) else (window,)
+    if not nodes or len(mask_points_world) == 0:
+        fallback = [{n: float(edt_radius[n]) for n in nodes} for _ in windows]
+        return fallback if isinstance(window, (tuple, list)) else fallback[0]
+    index = {n: i for i, n in enumerate(nodes)}
+    P = np.array([G.nodes[n]['pos'] for n in nodes])
+    r_edt = np.array([float(edt_radius[n]) for n in nodes])
+    d, j = cKDTree(P).query(mask_points_world)
+    vox = float(np.cbrt(voxel_volume))
+    ok = d <= max_factor * r_edt[j] + vox
+    V = np.bincount(j[ok], minlength=len(nodes)) * voxel_volume
+    l = np.zeros(len(nodes))
+    for u, v in G.edges():
+        e = np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
+        l[index[u]] += e / 2.0
+        l[index[v]] += e / 2.0
+    raw = np.where((l > 0) & (V > 0), np.sqrt(V / (np.pi * np.maximum(l, 1e-12))), r_edt)
+    outs = []
+    for w in windows:
+        half = w // 2
+        out = {}
+        for n in nodes:
+            near = nx.single_source_shortest_path_length(G, n, cutoff=half)
+            vals = [raw[index[m]] for m in near if G.degree(m) == 2] or [raw[index[n]]]
+            out[n] = float(np.median(vals))
+        outs.append(out)
+    return outs if isinstance(window, (tuple, list)) else outs[0]
+
+
+class SurfaceGeodesic:
+    """Shortest path length along the edges of a surface mesh, between the
+    mesh vertices nearest to two points -- the same quantity as vedo's
+    Mesh.geodesic (VTK Dijkstra on edge lengths, endpoints snapped to the
+    nearest vertex), but answering the only question the pipeline asks:
+    "is it longer than `limit`?". Dijkstra stops at `limit`, so each query
+    only explores the neighbourhood of the edge instead of the whole mesh
+    (~0.1 s per query with vedo on a brain mesh, ~1 ms here).
+
+    Vertices on two separate surface pieces return 0 (= "connected"), as the
+    vedo-based check did. Separate pieces next to adjacent skeleton voxels are
+    almost always diagonal-only voxel contacts inside one thin vessel:
+    marching cubes splits them, but the mask (and the skeleton graph) is
+    26-connected. Treating them as "no path" would cut the network into its
+    6-connected pieces (ADAM test mask: 7 -> 10 components, brain: -3 %
+    length).
+    """
+
+    def __init__(self, mesh):
+        from scipy.sparse import coo_matrix
+        V = np.asarray(mesh.vertices, dtype=np.float64)
+        faces = [f for f in mesh.cells if len(f) >= 2]
+        a, b = [], []
+        for f in faces:
+            for i in range(len(f)):
+                a.append(f[i])
+                b.append(f[(i + 1) % len(f)])
+        a, b = np.asarray(a), np.asarray(b)
+        w = np.linalg.norm(V[a] - V[b], axis=1)
+        n = len(V)
+        g = coo_matrix((np.r_[w, w], (np.r_[a, b], np.r_[b, a])), shape=(n, n)).tocsr()
+        g.sum_duplicates()
+        # duplicate (shared) edges were summed above; restore single lengths
+        g.data = np.linalg.norm(V[g.indices] - V[np.repeat(np.arange(n), np.diff(g.indptr))], axis=1)
+        self.graph = g
+        self.tree = cKDTree(V)
+        from scipy.sparse.csgraph import connected_components
+        self.piece = connected_components(g, directed=False)[1]
+
+    def length(self, p1, p2, limit):
+        from scipy.sparse.csgraph import dijkstra
+        i = int(self.tree.query(p1)[1])
+        j = int(self.tree.query(p2)[1])
+        if i == j or self.piece[i] != self.piece[j]:
+            return 0.0
+        d = dijkstra(self.graph, indices=i, limit=limit)
+        return float(d[j])
+
+
+def code_version():
+    """Short git commit of this file's repository (+ '-dirty' if it has
+    uncommitted changes), or 'unknown'. Stored with every output so results
+    can be traced back to the code that produced them."""
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        sha = subprocess.run(['git', '-C', here, 'rev-parse', '--short', 'HEAD'], capture_output=True,
+                             text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(['git', '-C', here, 'status', '--porcelain', '--untracked-files=no'],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+        return (sha + ('-dirty' if dirty else '')) if sha else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def extend_endpoints(G, mask_index, affine, crop_shape, min_extension_mm=0.5):
+    """Extend skeleton tips that stop short of the end of their vessel.
+
+    skimage's thinning erodes near-axis vessel ends (up to ~7 mm on a 50 mm
+    phantom tube; ~1-2 % of total length on the test masks). For every
+    endpoint e with EDT radius r_e, take the mask voxels whose nearest graph
+    node is e, that lie more than r_e + 1 voxel from it (the part of the
+    vessel the skeleton did not reach), AND that are connected to the tip
+    through the mask -- otherwise the uncovered end of a *neighbouring*
+    vessel can capture the tip. Extend e straight toward their centroid by
+    (furthest projection - r_e), i.e. up to one radius short of the mask end
+    (where the centreline of a rounded vessel end lies), and stop earlier if
+    the line would leave the mask. Flat cut ends get ~0 extension.
+    New nodes every voxel, radius r_e. Returns the total length added (mm).
+    """
+    from scipy.ndimage import label as _label
+    ends = [n for n in G.nodes() if G.degree(n) == 1]
+    if not ends or len(mask_index) == 0:
+        return 0.0
+    vs = float(np.cbrt(abs(np.linalg.det(affine[:3, :3]))))
+    inv = np.linalg.inv(affine)
+    W_all = apply_affine(affine, mask_index)
+    inside = np.zeros(crop_shape, bool)
+    inside[tuple(mask_index.T)] = True
+    nodes = list(G.nodes())
+    P = np.array([G.nodes[n]['pos'] for n in nodes])
+    d, j = cKDTree(P).query(W_all)
+    index = {n: i for i, n in enumerate(nodes)}
+    next_id = max(nodes) + 1 if nodes else 0
+    added = 0.0
+
+    def _inside(p):
+        k = np.round(apply_affine(inv, p)).astype(int)
+        return bool(np.all(k >= 0) and np.all(k < crop_shape) and inside[tuple(k)])
+
+    for e in ends:
+        i = index[e]
+        r_e = float(G.nodes[e].get('radius', 0.0))
+        cell = np.flatnonzero(j == i)
+        beyond = cell[d[cell] > r_e + vs]
+        if len(beyond) < 3:
+            continue
+        # keep only the part of the cell connected (through the mask) to the
+        # voxel nearest the tip
+        ci = mask_index[cell]
+        lo = ci.min(axis=0)
+        box = np.zeros(ci.max(axis=0) - lo + 1, bool)
+        box[tuple((ci - lo).T)] = True
+        lab, _ = _label(box, np.ones((3, 3, 3)))
+        seed = ci[np.argmin(d[cell])] - lo
+        keep = lab[tuple((mask_index[beyond] - lo).T)] == lab[tuple(seed)]
+        beyond = beyond[keep]
+        if len(beyond) < 3:
+            continue
+        pe = np.asarray(G.nodes[e]['pos'], float)
+        W = W_all[beyond]
+        u = W.mean(axis=0) - pe
+        nu = np.linalg.norm(u)
+        if nu == 0:
+            continue
+        u /= nu
+        ext = float(np.max((W - pe) @ u)) - r_e
+        # stop where the straight extension would leave the mask
+        t, step = 0.0, 0.25 * vs
+        while t + step <= ext and _inside(pe + (t + step) * u):
+            t += step
+        ext = t
+        if ext < min_extension_mm:
+            continue
+        n_new = max(1, int(np.ceil(ext / vs)))
+        prev = e
+        for k in range(1, n_new + 1):
+            G.add_node(next_id, pos=pe + u * ext * k / n_new, radius=r_e, extended=True)
+            G.add_edge(prev, next_id)
+            prev = next_id
+            next_id += 1
+        added += ext
+    return added
+
+
+def facing_endpoint_pairs(G, max_gap_mm=12.0, max_angle_deg=60.0, min_radius_mm=1.0,
+                          tangent_skip_mm=1.0, tangent_mm=4.0):
+    """Pairs of vessel ends that point at each other across a short gap: the
+    signature of a vessel interrupted by a segmentation gap. A natural vessel
+    end (taper, field-of-view cut) has no second end facing it.
+
+    Both ends must have radius >= min_radius_mm (thin-vessel dropouts are
+    common and not what this counts), lie within max_gap_mm, and their
+    outward directions must point along the line joining them within
+    max_angle_deg. The direction is read between tangent_skip_mm and
+    tangent_skip_mm + tangent_mm from the end: at a cut end the skeleton bends
+    toward the centre of the flat face over the last ~1 mm. Ends of the same
+    component count only if the graph path between them is > 3x the gap
+    (otherwise it is a loop, not a gap). Returns (node_a, node_b, gap_mm)."""
+    def _p(n):
+        return np.asarray(G.nodes[n]['pos'], float)
+    ends = [n for n in G if G.degree(n) == 1 and float(G.nodes[n].get('radius', 0.0)) >= min_radius_mm]
+    if len(ends) < 2:
+        return []
+    out_dir = {}
+    for e in ends:
+        prev, cur, L, a = None, e, 0.0, None
+        while L < tangent_skip_mm + tangent_mm:
+            nb = [m for m in G.neighbors(cur) if m != prev]
+            if len(nb) != 1:
+                break
+            L += np.linalg.norm(_p(nb[0]) - _p(cur))
+            prev, cur = cur, nb[0]
+            if a is None and L >= tangent_skip_mm:
+                a = cur
+        if a is None or a == cur:
+            continue
+        v = _p(a) - _p(cur)
+        nv = np.linalg.norm(v)
+        if nv > 0:
+            out_dir[e] = v / nv
+    ends = [e for e in ends if e in out_dir]
+    if len(ends) < 2:
+        return []
+    comp = {}
+    for i, c in enumerate(nx.connected_components(G)):
+        for n in c:
+            comp[n] = i
+    cos_max = np.cos(np.radians(max_angle_deg))
+    P = np.array([_p(e) for e in ends])
+    pairs = []
+    for i, j in sorted(cKDTree(P).query_pairs(max_gap_mm)):
+        a, b = ends[i], ends[j]
+        v = P[j] - P[i]
+        gap = float(np.linalg.norm(v))
+        if gap == 0:
+            continue
+        u = v / gap
+        if np.dot(out_dir[a], u) < cos_max or np.dot(out_dir[b], -u) < cos_max:
+            continue
+        if comp[a] == comp[b]:
+            try:
+                if nx.shortest_path_length(G, a, b, weight=lambda x, y, _d: float(np.linalg.norm(_p(x) - _p(y)))) <= 3 * gap:
+                    continue
+            except nx.NetworkXNoPath:
+                pass
+        pairs.append((a, b, gap))
+    return pairs
+
+
+def graph_qc(G, mask_index, mask_points_world, voxel_volume, crop_shape, voxel_size):
+    """Quality-control numbers for one extracted graph.
+
+    uncovered_*: mask voxels farther from the graph than (EDT radius of the
+        nearest node + 1 mm) -- vessel the centreline does not reach (receded
+        tips, skeleton gaps). Radius-aware, unlike the previous fixed 2.5 mm
+        "orphan" rule, which also flagged the outer shell of thick vessels.
+    graph_to_mask_volume: frustum volume of the graph / mask volume.
+    small_component_length_fraction: share of length in components < 10 mm.
+    short_terminal_branches: terminal segments < 3 mm (spur proxy).
+    facing_endpoint_pairs: wide vessel ends (r >= 1 mm) facing each other
+        across a gap of <= 12 mm (see facing_endpoint_pairs()).
+    """
+    from scipy.ndimage import label as _label, find_objects
+    qc = {}
+    nodes = list(G.nodes())
+    qc['mask_volume_mm3'] = float(len(mask_index) * voxel_volume)
+    if not nodes:
+        return qc
+    P = np.array([G.nodes[n]['pos'] for n in nodes])
+    r_edt = np.array([float(G.nodes[n].get('radius_edt', G.nodes[n].get('radius', 0.0))) for n in nodes])
+    d, j = cKDTree(P).query(mask_points_world)
+    unc = d > r_edt[j] + 1.0
+    qc['uncovered_volume_fraction'] = float(unc.mean()) if len(unc) else 0.0
+    vol = np.zeros(crop_shape, bool)
+    vol[tuple(mask_index[unc].T)] = True
+    lab, _ = _label(vol, np.ones((3, 3, 3)))
+    ext = []
+    for sl in find_objects(lab):
+        if sl is not None:
+            ext.append(max(s.stop - s.start for s in sl) * voxel_size)
+    ext = np.array(ext)
+    qc['uncovered_regions_gt2mm'] = int((ext > 2).sum())
+    qc['uncovered_extent_gt2mm_mm'] = float(ext[ext > 2].sum())
+    vol_g = 0.0
+    for u, v in G.edges():
+        l = np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos'])
+        ru, rv = G.nodes[u].get('radius', 0.0), G.nodes[v].get('radius', 0.0)
+        vol_g += np.pi * l * (ru * ru + ru * rv + rv * rv) / 3.0
+    qc['graph_to_mask_volume'] = float(vol_g / qc['mask_volume_mm3']) if qc['mask_volume_mm3'] > 0 else np.nan
+    lens = []
+    for c in nx.connected_components(G):
+        lens.append(sum(np.linalg.norm(G.nodes[u]['pos'] - G.nodes[v]['pos']) for u, v in G.subgraph(c).edges()))
+    lens = np.array(lens)
+    qc['num_components'] = int(len(lens))
+    qc['small_component_length_fraction'] = float(lens[lens < 10].sum() / lens.sum()) if lens.sum() > 0 else np.nan
+    short = 0
+    for e in [n for n in G if G.degree(n) == 1]:
+        prev, cur, L = None, e, 0.0
+        while True:
+            nb = [m for m in G.neighbors(cur) if m != prev]
+            if len(nb) != 1:
+                break
+            L += np.linalg.norm(G.nodes[cur]['pos'] - G.nodes[nb[0]]['pos'])
+            prev, cur = cur, nb[0]
+            if G.degree(cur) != 2 or L >= 3.0:
+                break
+        if G.degree(cur) >= 3 and L < 3.0:
+            short += 1
+    qc['short_terminal_branches'] = int(short)
+    qc['facing_endpoint_pairs'] = len(facing_endpoint_pairs(G))
+    return qc
+
+
 def laplacian_smooth_graph(graph, iterations, alpha):
     """
     Smooths node positions using uniform ("umbrella") Laplacian smoothing.
@@ -132,7 +489,6 @@ def laplacian_smooth_graph(graph, iterations, alpha):
         for node in graph.nodes():
             if graph.degree(node) <= 1: continue
             neighbors = list(graph.neighbors(node))
-            if not neighbors: continue
             neighbor_sum = np.sum([pos[n] for n in neighbors], axis=0)
             new_pos[node] = (1 - alpha) * pos[node] + alpha * (neighbor_sum / len(neighbors))
         pos = new_pos
@@ -148,11 +504,20 @@ def extract_graph(
     smooth_reference_spacing_mm: float = 0.5,
     smooth_iters_max: int = 3,
     intensity_threshold: float = 0.6,
-    orphan_distance_threshold: float = 2.5,
-    merge_distance: float = 3.0,
     target_iso_spacing: float = None,
-    min_branch_length_mm: float = 2.0
+    min_branch_length_mm: float = 2.0,
+    mask_smoothing_mm: float = 0.0,
+    extend_tips: bool = True,
 ):
+    """Extract the centreline graph of a binary vessel mask."""
+    import time as _time
+    _t0 = _time.time()
+    params = dict(smooth_iters=smooth_iters, smooth_alpha=smooth_alpha,
+                  smooth_reference_spacing_mm=smooth_reference_spacing_mm, smooth_iters_max=smooth_iters_max,
+                  intensity_threshold=intensity_threshold, target_iso_spacing=target_iso_spacing,
+                  min_branch_length_mm=min_branch_length_mm, mask_smoothing_mm=mask_smoothing_mm,
+                  extend_tips=extend_tips)
+    stages = {'rung_contractions': 0, 'tip_extension_mm': 0.0}
     case_name = os.path.basename(output_folder)
     print(f"\n{'=' * 60}")
     print(f"PROCESSING CASE: {case_name}")
@@ -164,6 +529,7 @@ def extract_graph(
     os.makedirs(output_folder, exist_ok=True)
     output_pkl = os.path.join(output_folder, f"{base_name}_vessel_data.pkl")
     output_vtp = os.path.join(output_folder, f"{base_name}_vessel_graph.vtp")
+    output_qc = os.path.join(output_folder, f"{base_name}_graph_qc.json")
 
     # -------------------------------------------------------------------------
     # 1. LOAD DATA
@@ -179,16 +545,18 @@ def extract_graph(
     # -------------------------------------------------------------------------
     # 1.5  PREPROCESSING  –  fill internal holes
     # -------------------------------------------------------------------------
-    print("  Preprocessing: Filling internal holes in the mask...")
-    data = preprocess_mask(data)
-
     # 1.55  CROP TO MASK BOUNDING BOX -- vascular masks are often <1% of the
     # full FOV; cropping before resampling/skeletonization/meshing (all of
     # which scale with array size) is the single biggest lever on peak memory.
+    # Done before hole filling: with an empty margin all round, every
+    # background region outside the mask still touches the crop border, so
+    # binary_fill_holes gives the same result on a fraction of the volume.
     orig_shape = data.shape
     data, affine = crop_to_mask_bbox(data, affine, voxel_sizes)
     print(f"  Cropped to mask bounding box: {orig_shape} -> {data.shape} "
           f"({100 * np.prod(data.shape) / np.prod(orig_shape):.1f}% of original volume)")
+    print("  Preprocessing: Filling internal holes in the mask...")
+    data = preprocess_mask(data)
 
     # 1.6  RESAMPLE TO ISOTROPIC SPACE -- skeletonize() is sensitive to voxel
     # sampling density, so anisotropic data biases metrics. Default target is
@@ -209,12 +577,21 @@ def extract_graph(
         print(f"  Voxel spacing {np.round(voxel_sizes, 3)} mm already close to "
               f"target {target_iso_spacing:.2f} mm — skipping resample.")
 
+    mask_smoothing_used = effective_mask_smoothing(mask_smoothing_mm, voxel_sizes)
+    params['mask_smoothing_mm_used'] = mask_smoothing_used
+    if mask_smoothing_used > 0:
+        note = "" if mask_smoothing_used == mask_smoothing_mm else \
+            f" (raised from {mask_smoothing_mm} mm to {MIN_MASK_SMOOTHING_VOX} voxel)"
+        print(f"  Smoothing mask boundary (sigma {mask_smoothing_used:.3f} mm{note})...")
+        data = smooth_mask(data, voxel_sizes, mask_smoothing_used)
+
     # Resolution-scaled smoothing dose: scale iterations by
     # (reference/actual spacing)^2 so the physical smoothing radius stays
     # comparable across scans, capped to avoid over-smoothing at fine spacing.
-    smooth_iters_effective = min(smooth_iters_max, max(1, round(
+    smooth_iters_effective = 0 if smooth_iters <= 0 else min(smooth_iters_max, max(1, round(
         smooth_iters * (smooth_reference_spacing_mm / target_iso_spacing) ** 2
     )))
+    params.update(target_iso_spacing_used=float(target_iso_spacing), smooth_iters_effective=smooth_iters_effective)
     if smooth_iters_effective != smooth_iters:
         print(f"  Resolution-scaled smoothing: {smooth_iters} iterations at "
               f"{smooth_reference_spacing_mm}mm reference  →  {smooth_iters_effective} "
@@ -223,15 +600,6 @@ def extract_graph(
 
     # inv_affine must be computed *after* potential resampling
     inv_affine = np.linalg.inv(affine)
-
-    # -------------------------------------------------------------------------
-    # 2. MESH GENERATION
-    # -------------------------------------------------------------------------
-    print("  Generating Reference Mesh...")
-    vol = vedo.Volume(data)
-    mesh = vol.isosurface(value=0.5).apply_transform(affine.tolist())
-    mesh.clean()
-    del vol  # vedo/VTK holds its own copy of `data`; only `mesh` is needed from here on
 
     # -------------------------------------------------------------------------
     # 3. SKELETONIZATION
@@ -244,47 +612,7 @@ def extract_graph(
     # Distance transform for accurate radius sampling (in mm)
     full_dist_map_vox = distance_transform_edt(data > 0, sampling=voxel_sizes).astype(np.float32)
 
-    # 4. ORPHAN DETECTION -- QC diagnostic only, never added to the graph.
-    # Orphans are mask regions the skeleton never reached; adding them would
-    # fabricate off-centerline segments, so they're only counted as a gap signal.
-    print(f"  Detecting orphan regions (Threshold > {orphan_distance_threshold} mm)...")
-    dist_to_skel = distance_transform_edt(~skeleton_mask, sampling=voxel_sizes).astype(np.float32)
-    del skeleton_mask  # only needed to build `~skeleton_mask` above
-
-    orphan_mask = (data > 0) & (dist_to_skel > orphan_distance_threshold)
-    del dist_to_skel
-    labeled_orphans, num_zones = label(orphan_mask)
-
-    # One vectorised call over all labels, not one full-array scan per zone:
-    # center_of_mass accepts an index list and returns every centroid at once.
-    if num_zones > 0:
-        cms = center_of_mass(orphan_mask, labeled_orphans, index=range(1, num_zones + 1))
-        orphan_points_world = apply_affine(affine, np.array(cms))
-    else:
-        orphan_points_world = np.empty((0, 3))
-    del orphan_mask, labeled_orphans
-
-    if len(orphan_points_world) > 0:
-        tree = cKDTree(orphan_points_world)
-        pairs = tree.query_pairs(r=merge_distance)
-        g_tmp = nx.Graph()
-        g_tmp.add_nodes_from(range(len(orphan_points_world)))
-        g_tmp.add_edges_from(pairs)
-
-        merged_indices = []
-        for component in nx.connected_components(g_tmp):
-            comp_list = list(component)
-            cluster_coords = orphan_points_world[comp_list]
-            centroid = np.mean(cluster_coords, axis=0)
-            closest_idx = np.argmin(np.linalg.norm(cluster_coords - centroid, axis=1))
-            merged_indices.append(comp_list[closest_idx])
-
-        if merged_indices:
-            orphan_points_world = orphan_points_world[merged_indices]
-        else:
-            orphan_points_world = np.array([])
-        print(f"    Orphan regions detected (excluded from graph): "
-              f"{len(orphan_points_world)}")
+    del skeleton_mask
 
     # -------------------------------------------------------------------------
     # 5. BUILD GRAPH  (with accurate radii from the distance transform)
@@ -296,10 +624,7 @@ def extract_graph(
     # the true integer index (e.g. 541.99999996), and truncating would read
     # the wrong voxel and produce a spurious zero radius.
     for i, pt in enumerate(skel_points_world):
-        pos_vox = np.round(apply_affine(inv_affine, pt)).astype(int)
-        pos_vox = np.clip(pos_vox, 0, np.array(data.shape) - 1)
-        r = full_dist_map_vox[tuple(pos_vox)]
-        G.add_node(i, pos=pt, radius=r)
+        G.add_node(i, pos=pt, radius=full_dist_map_vox[tuple(skel_indices[i])])
 
     del full_dist_map_vox  # not referenced again after node radii are assigned
 
@@ -321,6 +646,7 @@ def extract_graph(
     # 6. PRUNING  –  triangle collapse
     # -------------------------------------------------------------------------
     print("  Pruning...")
+    _e0 = G.number_of_edges()
     for tri in [c for c in nx.enumerate_all_cliques(G) if len(c) == 3]:
         edges = [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])]
         longest = max(
@@ -332,29 +658,49 @@ def extract_graph(
         if G.has_edge(*longest):
             G.remove_edge(*longest)
 
+    stages['triangle_edges_removed'] = _e0 - G.number_of_edges()
     # Intensity-gated edge pruning with geodesic fallback
+    # An edge whose straight line leaves the mask is cut if the shortest path
+    # along the vessel surface between its ends is more than 2x the edge
+    # length. Ends on two separate surface pieces count as connected (see
+    # SurfaceGeodesic): almost always a diagonal voxel contact in one vessel.
     step = np.min(voxel_sizes) * 0.5
     edges_to_remove = []
+    geodesic = None
     for u, v in G.edges():
         p1, p2 = G.nodes[u]['pos'], G.nodes[v]['pos']
         dist = np.linalg.norm(p2 - p1)
         pts = p1 + np.outer(np.linspace(0, 1, max(2, int(dist / step) + 1)), p2 - p1)
-        vals = map_coordinates(data, apply_affine(inv_affine, pts).T, order=1)
+        # float output: on a uint8 volume (no resampling) map_coordinates
+        # would round the interpolated values to 0/1
+        vals = map_coordinates(data, apply_affine(inv_affine, pts).T, order=1, output=np.float32)
         if np.any(vals < intensity_threshold):
+            if geodesic is None:
+                # surface mesh, built lazily: most masks need few queries
+                print("  Building the surface mesh for the edge check...")
+                vol = vedo.Volume(data)
+                mesh = vol.isosurface(value=0.5).apply_transform(affine.tolist())
+                mesh.clean()
+                del vol
+                geodesic = SurfaceGeodesic(mesh)
+                del mesh
             try:
-                id1 = mesh.closest_point(p1, return_point_id=True)
-                id2 = mesh.closest_point(p2, return_point_id=True)
-                path_obj = mesh.geodesic(id1, id2)
-                if path_obj:
-                    geo_dist = np.sum(np.linalg.norm(np.diff(path_obj.vertices, axis=0), axis=1))
-                    if (geo_dist / dist) > 2.0:
-                        edges_to_remove.append((u, v))
-                else:
+                if geodesic.length(p1, p2, limit=2.0 * dist) > 2.0 * dist:
                     edges_to_remove.append((u, v))
-            except Exception:
-                edges_to_remove.append((u, v))
+            except Exception as e:
+                # Keep the edge: an unexpected error is not evidence that the
+                # edge leaves the vessel.
+                print(f"    ! Geodesic check failed for edge ({u}, {v}): {e}; edge kept.")
     G.remove_edges_from(edges_to_remove)
-    del data  # not referenced again; remaining steps operate on the graph only
+    del geodesic
+    stages['surface_check_edges_cut'] = len(edges_to_remove)
+    # Mask voxels (indices + world mm) for tip extension, radii and QC; the
+    # volume itself is no longer needed.
+    mask_index = np.argwhere(data > 0.5)
+    mask_points_world = apply_affine(affine, mask_index)
+    voxel_volume = float(abs(np.linalg.det(affine[:3, :3])))
+    crop_shape = data.shape
+    del data
 
     # -------------------------------------------------------------------------
     # 6.5  FILTER SMALL COMPONENTS  (physically agnostic – works in mm)
@@ -373,12 +719,23 @@ def extract_graph(
             nodes_to_remove.extend(list(component))
 
     G.remove_nodes_from(nodes_to_remove)
+    stages['small_component_nodes_removed'] = len(nodes_to_remove)
 
     # -------------------------------------------------------------------------
     # 6.6  PRUNE FALSE BRANCHES  (terminal hairs, physically agnostic)
     # -------------------------------------------------------------------------
     print(f"  Pruning terminal branches < {min_branch_length_mm} mm...")
+    _n0 = G.number_of_nodes()
     prune_terminal_hairs(G, min_branch_length_mm)
+    stages['hair_nodes_pruned'] = _n0 - G.number_of_nodes()
+
+    # 6.65 EXTEND RECEDED TIPS -- see extend_endpoints(). On by default: on
+    # 35 phantoms it takes the mean length error from -2.4 % to -0.1 % (worst
+    # -15 % -> -2.4 %) without changing topology.
+    if extend_tips:
+        added = extend_endpoints(G, mask_index, affine, crop_shape)
+        stages['tip_extension_mm'] = round(float(added), 3)
+        print(f"  Extended receded vessel tips by {added:.1f} mm in total.")
 
     # 6.7  CONTRACT LADDER RUNGS -- skeletonize() can produce a "ladder": two
     # parallel skeleton lines cross-linked by tiny rungs, both endpoints
@@ -399,9 +756,12 @@ def extract_graph(
                 new_pos = (G.nodes[u]['pos'] + G.nodes[v]['pos']) / 2.0
                 new_radius = (G.nodes[u].get('radius', 0.5) + G.nodes[v].get('radius', 0.5)) / 2.0
                 nx.contracted_nodes(G, u, v, self_loops=False, copy=False)
+                G.nodes[u].pop('contraction', None)  # networkx's copy of v's attributes
                 G.nodes[u]['pos'] = new_pos
                 G.nodes[u]['radius'] = new_radius
+                G.nodes[u]['merged'] = True
                 contracting = True
+                stages['rung_contractions'] = stages.get('rung_contractions', 0) + 1
                 break  # topology changed; restart the scan
 
     # -------------------------------------------------------------------------
@@ -409,6 +769,20 @@ def extract_graph(
     # -------------------------------------------------------------------------
     print(f"  Smoothing ({smooth_iters_effective} iterations)...")
     G = laplacian_smooth_graph(G, iterations=smooth_iters_effective, alpha=smooth_alpha)
+
+    # 7.5 RADIUS -- equivalent-cylinder radius on the final node positions.
+    # The EDT value read at the skeleton voxel is kept as 'radius_edt'.
+    print("  Estimating radii (equivalent cylinder)...")
+    edt_r = {n: float(G.nodes[n]['radius']) for n in G.nodes()}
+    eq_r = equivalent_cylinder_radii(G, mask_points_world, voxel_volume, edt_r)
+    for n in G.nodes():
+        G.nodes[n]['radius_edt'] = edt_r[n]
+        G.nodes[n]['radius'] = eq_r[n]
+
+    qc = graph_qc(G, mask_index, mask_points_world, voxel_volume, crop_shape, float(np.min(voxel_sizes)))
+    qc.update(stages)
+    qc['runtime_s'] = round(_time.time() - _t0, 1)
+    del mask_points_world, mask_index
 
     # -------------------------------------------------------------------------
     # 8. SAVE OUTPUTS
@@ -424,10 +798,17 @@ def extract_graph(
         'graph': G,
         'node_radius_map': legacy_radius_map,
         'voxel_sizes': voxel_sizes,          # isotropic spacing stored here
-        'input_file': nifti_path
+        'input_file': nifti_path,
+        'params': params,
+        'code_version': code_version(),
+        'qc': qc,
     }
     with open(output_pkl, 'wb') as f:
         pickle.dump(package, f)
+    import json as _json
+    with open(output_qc, 'w') as f:
+        _json.dump({'input_file': nifti_path, 'code_version': package['code_version'], 'params': params, 'qc': qc},
+                   f, indent=1, default=float)
 
     # --- EXPORT VTP FILES ---
     s_pts = [G.nodes[u]['pos'] for u, v in G.edges()]
@@ -477,13 +858,17 @@ if __name__ == "__main__":
                              "calibrated for (default: 0.5).")
     parser.add_argument("--intensity_thresh", type=float, default=0.6,
                         help="Intensity threshold for edge pruning (default: 0.6).")
-    parser.add_argument("--orphan_dist",    type=float, default=2.5,
-                        help="Orphan detection distance threshold mm (default: 2.5).")
-    parser.add_argument("--merge_dist",     type=float, default=3.0,
-                        help="Orphan merge distance threshold mm (default: 3.0).")
     parser.add_argument("--target_iso",     type=float, default=None,
                         help="Target isotropic voxel spacing in mm (default: auto -- this "
                              "image's finest native axis, so no axis is downsampled).")
+    parser.add_argument("--no_extend_tips", action="store_true",
+                        help="Do not extend skeleton tips that stop short of their vessel end "
+                             "(extension is on by default).")
+    parser.add_argument("--mask_smoothing", type=float, default=0.0,
+                        help="Gaussian smoothing (mm) of the mask boundary before "
+                             "skeletonisation, for noisy segmentations only (default: 0 = off; "
+                             "0.25 validated; raised to at least 0.7 voxel; erodes vessels thinner "
+                             "than ~1 voxel).")
     parser.add_argument("--min_branch_len",  type=float, default=2.0,
                         help="Prune terminal branches (leaf-to-bifurcation hairs) shorter than "
                              "this many mm as skeletonization spurs (default: 2.0); raise to "
@@ -499,10 +884,10 @@ if __name__ == "__main__":
             smooth_alpha=args.smooth_alpha,
             smooth_reference_spacing_mm=args.smooth_reference_spacing,
             intensity_threshold=args.intensity_thresh,
-            orphan_distance_threshold=args.orphan_dist,
-            merge_distance=args.merge_dist,
             target_iso_spacing=args.target_iso,
-            min_branch_length_mm=args.min_branch_len
+            min_branch_length_mm=args.min_branch_len,
+            mask_smoothing_mm=args.mask_smoothing,
+            extend_tips=not args.no_extend_tips
         )
     except Exception as e:
         print(f"Error during graph extraction: {e}")

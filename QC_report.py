@@ -42,7 +42,6 @@ from Metric_extractor import (
     compute_metrics_for_mask,
     compute_tortuosity_metrics,
     extract_branch_segments,
-    compute_main_path,
     load_label_map,
     robust_graph_loader,
 )
@@ -134,8 +133,8 @@ def build_mask_mesh(mask_path, target_faces=45000):
 
 def assign_regions(G, node_list, atlas_path, label_map_path):
     """
-    Map each graph node to an arterial territory id, mirroring the lookup in
-    Metric_extractor.extract_metrics (nibabel, RAS, ids 1..30 only).
+    Map each graph node to an atlas region id, as Metric_extractor does:
+    nibabel/RAS lookup of the node's voxel, any positive label is a region.
 
     Returns (region_per_node, region_names, n_unassigned).
     """
@@ -153,11 +152,8 @@ def assign_regions(G, node_list, atlas_path, label_map_path):
     region = np.zeros(len(node_list), dtype=int)
     if np.any(inside):
         ii = idx[inside]
-        vals = atlas[ii[:, 0], ii[:, 1], ii[:, 2]]
-        # Same filter as the metric pipeline: keep the 30 arterial territories,
-        # drop ventricles (31, 32) and background.
-        vals = np.where((vals > 0) & (vals <= 30), vals, 0)
-        region[inside] = vals
+        # Same rule as the metric pipeline: any positive label is a region.
+        region[inside] = np.maximum(atlas[ii[:, 0], ii[:, 1], ii[:, 2]], 0)
 
     names = {int(r): labels.get(int(r), f"region_{int(r)}")
              for r in np.unique(region) if r > 0}
@@ -242,9 +238,7 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
         endpoints = [n for n in cnodes if G.degree(n) == 1]
         bifs = [n for n in cnodes if G.degree(n) >= 3]
 
-        # The dominant-vessel path, shown as the "root" overlay for reference.
-        main_chain = compute_main_path(Gc, node_radius_map)
-        roots = [main_chain[0], main_chain[-1]] if main_chain else []
+        roots = []  # no roots with the unique branch decomposition
 
         if max_segments_per_root is not None and len(seg_list) > max_segments_per_root:
             seg_list = sorted(
@@ -261,7 +255,7 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
             pts = np.array([G.nodes[n]['pos'] for n in seg], dtype=np.float64)
             l_geo = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1))) if len(pts) > 1 else 0.0
             chord = float(np.linalg.norm(pts[-1] - pts[0])) if len(pts) > 1 else 0.0
-            tort = compute_tortuosity_metrics(pts, smoothing=0, n_samples=500)
+            tort = compute_tortuosity_metrics(pts)
             # Length-weighted mean diameter along the branch.
             diam = np.array([2 * node_radius_map.get(n, 0.5) for n in seg], dtype=np.float64)
             if len(pts) > 1:
@@ -293,7 +287,6 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
             })
 
         agg = cm.get('aggregated_tortuosity', {})
-        mp = cm.get('main_path_tortuosity', {})
         components.append({
             'cid': cid,
             'n_nodes': len(cnodes),
@@ -311,8 +304,8 @@ def build_payload(graph_pkl_path, mask_path=None, atlas_path=None,
             'root_collision': False,
             'agg_curv': [_f(agg.get('mean_curvature', np.nan), 5)],
             'agg_curv2': [_f(agg.get('mean_square_curvature', np.nan), 6)],
-            'main_curv': _f(mp.get('mean_curvature', np.nan), 5),
-            'main_curv2': _f(mp.get('mean_square_curvature', np.nan), 6),
+            'main_curv': _f(np.nan, 5),
+            'main_curv2': _f(np.nan, 6),
             'n_segments': len(seg_ids_by_root[0]),
             'segs_by_root': seg_ids_by_root,
         })

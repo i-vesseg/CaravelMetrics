@@ -83,9 +83,11 @@ are read; if no MRA is available at all, run [the stages individually](#chaining
 $ python CaravelMetrics.py --help
 usage: CaravelMetrics.py [-h] -i IMAGE -m MASK -o OUTPUT_DIR [--t1 T1]
                          [--template TEMPLATE] [--parcellation PARCELLATION]
-                         [--label_map LABEL_MAP] [--no_atlas] [--preprocess_mra]
-                         [--preprocess_t1] [--mra_stripped] [--t1_stripped]
-                         [--min_branch_len MIN_BRANCH_LEN] [--html_qc]
+                         [--label_map LABEL_MAP] [--no_atlas]
+                         [--preprocess_mra] [--preprocess_t1] [--mra_stripped]
+                         [--t1_stripped] [--min_branch_len MIN_BRANCH_LEN]
+                         [--target_iso TARGET_ISO] [--no_extend_tips]
+                         [--mask_smoothing MASK_SMOOTHING] [--html_qc]
                          [--qc_dir QC_DIR] [--registration_snapshot]
 
 Caravel - Single Subject Processing Pipeline
@@ -113,6 +115,20 @@ options:
                         Prune terminal branches (leaf-to-bifurcation hairs)
                         shorter than this many mm as skeletonization spurs
                         (default: 2.0).
+  --target_iso TARGET_ISO
+                        Isotropic spacing (mm) to resample every mask to
+                        (default: each scan's finest axis). Set one value for
+                        a whole cohort so all subjects are processed on the
+                        same grid. Note: it cannot undo acquisition
+                        differences -- bifurcation counts still change with
+                        scan resolution.
+  --no_extend_tips      Do not extend skeleton tips that stop short of their
+                        vessel end (on by default).
+  --mask_smoothing MASK_SMOOTHING
+                        Gaussian smoothing (mm) of the mask boundary before
+                        skeletonisation, for noisy segmentations only
+                        (default: 0 = off; 0.25 validated; raised to at least
+                        0.7 voxel; erodes vessels thinner than ~1 voxel).
   --html_qc             Also write an interactive HTML QC report for the
                         extracted graph.
   --qc_dir QC_DIR       Where to write the QC report (default: the subject's
@@ -174,6 +190,14 @@ options:
 
 ### Stage 2 — Graph extraction
 
+Options added in the 2026 review:
+`--target_iso` (one isotropic spacing for a whole cohort), `--mask_smoothing 0.25` (only for
+noisy segmentations: removes voxel-noise spurs but erodes vessels thinner than ~1 voxel; sigma is
+raised to at least 0.7 voxel, below which it leaves voxel noise in place), and
+`--no_extend_tips` (tip extension is on by default). The former `--orphan_dist`/`--merge_dist`
+options were removed: the radius-aware uncovered-vessel measure in the QC output replaces the
+orphan count.
+
 Converts a binary vessel mask into a vessel graph (`.pkl` + `.vtp`). No FSL, no atlas, not
 brain-specific -- works for any binary vessel mask (TOF-MRA, CTA, ...).
 
@@ -190,8 +214,8 @@ usage: Graph_extractor.py [-h] --mask MASK --output_dir OUTPUT_DIR
                           [--smooth_alpha SMOOTH_ALPHA]
                           [--smooth_reference_spacing SMOOTH_REFERENCE_SPACING]
                           [--intensity_thresh INTENSITY_THRESH]
-                          [--orphan_dist ORPHAN_DIST] [--merge_dist MERGE_DIST]
-                          [--target_iso TARGET_ISO]
+                          [--target_iso TARGET_ISO] [--no_extend_tips]
+                          [--mask_smoothing MASK_SMOOTHING]
                           [--min_branch_len MIN_BRANCH_LEN]
 
 Vessel Graph Extractor Module
@@ -208,18 +232,21 @@ options:
   --smooth_alpha SMOOTH_ALPHA
                         Laplacian smoothing alpha (default: 0.8).
   --smooth_reference_spacing SMOOTH_REFERENCE_SPACING
-                        Reference isotropic spacing (mm) that --smooth_iters is
-                        calibrated for (default: 0.5).
+                        Reference isotropic spacing (mm) that --smooth_iters
+                        is calibrated for (default: 0.5).
   --intensity_thresh INTENSITY_THRESH
                         Intensity threshold for edge pruning (default: 0.6).
-  --orphan_dist ORPHAN_DIST
-                        Orphan detection distance threshold mm (default: 2.5).
-  --merge_dist MERGE_DIST
-                        Orphan merge distance threshold mm (default: 3.0).
   --target_iso TARGET_ISO
                         Target isotropic voxel spacing in mm (default: auto --
                         this image's finest native axis, so no axis is
                         downsampled).
+  --no_extend_tips      Do not extend skeleton tips that stop short of their
+                        vessel end (extension is on by default).
+  --mask_smoothing MASK_SMOOTHING
+                        Gaussian smoothing (mm) of the mask boundary before
+                        skeletonisation, for noisy segmentations only
+                        (default: 0 = off; 0.25 validated; raised to at least
+                        0.7 voxel; erodes vessels thinner than ~1 voxel).
   --min_branch_len MIN_BRANCH_LEN
                         Prune terminal branches (leaf-to-bifurcation hairs)
                         shorter than this many mm as skeletonization spurs
@@ -378,7 +405,8 @@ volume is not required.
 **With the atlas layer**, `results/subject001_MRA/` contains the registered/dilated atlas, the vessel graph
 (`.pkl` + `.vtp`), `subject001_MRA_global_summary.csv` (whole-graph metrics),
 `subject001_MRA_region_summary.csv` + `subject001_MRA_all_components_by_region.csv`
-(per-territory), plus the two independent QC outputs (`--html_qc`, `--registration_snapshot`) --
+(per-territory), per-segment and per-bifurcation tables, a QC table with pass/fail flags, a
+run-info file recording the code version and every parameter, plus the two independent QC outputs (`--html_qc`, `--registration_snapshot`) --
 every file is prefixed with the subject name, so files do not collide when several subjects'
 folders are gathered into one place:
 
@@ -394,8 +422,12 @@ results/
     ├── subject001_MRA_all_components_by_region.csv           # per-connected-component metrics
     ├── subject001_MRA_QC.html                                # HTML graph report (with --html_qc)
     ├── subject001_MRA_QC_snapshot.png                        # registration PNG (with --registration_snapshot)
+    ├── subject001_MRA_segments.csv                           # one row per branch segment (all regions)
+    ├── subject001_MRA_bifurcations.csv                       # one row per junction: angles, short-loop flag
+    ├── subject001_MRA_qc.csv                                 # QC numbers + flags (qc_pass, qc_flags)
+    ├── subject001_MRA_run_info.json                          # code version, parameters, inputs
+    ├── subject001_MRA_graph_qc.json                          # graph-extraction QC (also stored in the .pkl)
     ├── regional_vtps/                                        # one VTP per atlas territory
-    ├── regional_results/                                     # per-region, per-component detail + segment CSVs
     └── processing.log
 ```
 
@@ -407,7 +439,8 @@ that step.
 **Core only** (`--no_atlas`, or the manual `Graph_extractor.py`/`Metric_extractor.py` chain)
 produces no per-territory breakdown and no `global_summary.csv`. Metrics are written directly into
 `output_folder` as `region_summary.csv` (with a single `global` pseudo-region) +
-`all_components_by_region.csv`, both still prefixed with the subject name. This is
+`all_components_by_region.csv`, plus `segments.csv`, `bifurcations.csv`, `qc.csv` and
+`run_info.json`, all prefixed with the subject name. This is
 `extract_metrics`'s convention whenever `registered_atlas_path` is `None`, so it applies whether the
 run used `CaravelMetrics.py --no_atlas` or the individual stages. `--registration_snapshot` has no
 effect with `--no_atlas`, as there is no registration step to snapshot.

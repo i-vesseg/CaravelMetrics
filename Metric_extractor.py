@@ -12,12 +12,13 @@ import networkx as nx
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from scipy.interpolate import splprep, splev, interp1d
+from scipy.interpolate import splprep, splev
 from scipy.spatial import cKDTree
-from sklearn.linear_model import LinearRegression
 import pickle
 import vedo
 from pathlib import Path
+
+import Branch_metrics as BM
 
 
 def load_label_map(txt_path):
@@ -37,108 +38,137 @@ def load_label_map(txt_path):
             
     return labels
 
-def compute_tortuosity_metrics(points, smoothing=0, n_samples=500):
-    """Curvature of a branch, measured on a smooth spline through the skeleton
-    nodes. Curvature is undefined on a raw polyline (zero along segments,
-    infinite at nodes), so the spline is required *here* -- but its arc length
-    is only the integration measure for that curvature and is never reported.
-    All reported lengths (and the tortuosity ratio) use the geodesic polyline
-    length instead, so there is a single definition of length everywhere."""
-    pts = np.asarray(points)
+_CURV_KEYS = ('spline_mean_curvature', 'spline_mean_square_curvature', 'spline_rms_curvature')
+_trapz = getattr(np, 'trapezoid', None) or getattr(np, 'trapz')
 
+
+def compute_tortuosity_metrics(points, sigma=0.25, end_trim=2.0, min_length=6.0,
+                               n_samples=500, smoothing=None):
+    """Mean curvature of a branch on a *smoothing* spline through its nodes.
+
+    Curvature is undefined on a raw polyline, so a spline is needed; but an
+    interpolating spline (s=0) follows the voxel staircase of the skeleton and
+    returns ~0.1-0.3 /mm of noise whatever the true curvature. The spline here
+    may deviate from the nodes by an RMS of `sigma` mm (s = n * sigma^2).
+
+    end_trim   arc length (mm) excluded at each end: the skeleton bends into
+               bifurcation centres and erodes at tips.
+    min_length segments shorter than this (spline arc length, mm) give NaN.
+    smoothing  explicit splprep `s`; overrides sigma when given.
+
+    Returns true means (integral over the trimmed arc / its length). Its arc
+    length is only the integration measure; reported lengths use the
+    geodesic polyline length. Validated on phantoms.
+    """
+    nan = {k: np.nan for k in _CURV_KEYS}
+    pts = np.asarray(points, float)
     # Consecutive duplicate points crash splprep; drop them (keep the first).
     if pts.shape[0] > 1:
-        diffs = np.linalg.norm(np.diff(pts, axis=0), axis=1)
-        pts = pts[np.insert(diffs > 1e-6, 0, True)]
-
+        pts = pts[np.insert(np.linalg.norm(np.diff(pts, axis=0), axis=1) > 1e-6, 0, True)]
     if pts.shape[0] < 4:
-        return {k: np.nan for k in [
-            'spline_mean_curvature', 'spline_mean_square_curvature',
-            'spline_rms_curvature']}
+        return nan
+    s = len(pts) * sigma ** 2 if smoothing is None else smoothing
+    try:
+        tck, _ = splprep(pts.T, s=s)
+    except Exception:
+        return nan
 
-    tck, _ = splprep(pts.T, s=smoothing)
-    u_fine   = np.linspace(0, 1, n_samples)
-    deriv1   = np.array(splev(u_fine, tck, der=1)).T
-    ds       = np.linalg.norm(deriv1, axis=1) * np.gradient(u_fine)
-    s_cum    = np.cumsum(ds) - ds[0]
-    arc_len  = s_cum[-1]   # internal integration measure only -- not reported
+    u = np.linspace(0, 1, 4 * n_samples)
+    speed = np.linalg.norm(np.array(splev(u, tck, der=1)).T, axis=1)
+    s_cum = np.r_[0, np.cumsum(0.5 * (speed[1:] + speed[:-1]) * np.diff(u))]
+    arc_len = s_cum[-1]
+    if arc_len < max(min_length, 2 * end_trim + 1e-6):
+        return nan
 
-    # Resample the spline at uniform arc-length spacing before differencing, so
-    # curvature is measured on a constant-speed parameterisation.
-    u_of_s    = interp1d(s_cum, u_fine, kind='linear', bounds_error=False, fill_value=(0, 1))
-    s_uniform = np.linspace(0, arc_len, n_samples)
-    pts_u     = np.array(splev(u_of_s(s_uniform), tck)).T
-
-    dt = s_uniform[1] - s_uniform[0]
-    d1 = np.gradient(pts_u, dt, axis=0)
-    d2 = np.gradient(d1, dt, axis=0)
-
-    speed     = np.linalg.norm(d1, axis=1)
-    curvature = np.linalg.norm(np.cross(d1, d2), axis=1) / (speed**3 + 1e-10)
-
-    # np.trapz was removed in NumPy 2.0; np.trapezoid is its replacement.
-    trapz = getattr(np, 'trapz', None) or np.trapezoid
-    mean_curv    = (trapz(curvature, s_uniform) / arc_len) if arc_len > 0 else 0
-    mean_sq_curv = (trapz(curvature**2, s_uniform) / arc_len) if arc_len > 0 else 0
-    rms_curv     = np.sqrt(mean_sq_curv)
-
+    s_eval = np.linspace(end_trim, arc_len - end_trim, n_samples)
+    u_eval = np.interp(s_eval, s_cum, u)
+    d1 = np.array(splev(u_eval, tck, der=1)).T
+    d2 = np.array(splev(u_eval, tck, der=2)).T
+    curvature = (np.linalg.norm(np.cross(d1, d2), axis=1)
+                 / np.maximum(np.linalg.norm(d1, axis=1) ** 3, 1e-12))
+    L = s_eval[-1] - s_eval[0]
+    mean_curv = _trapz(curvature, s_eval) / L
+    mean_sq_curv = _trapz(curvature ** 2, s_eval) / L
     return {
-        'spline_mean_curvature':       mean_curv,
-        'spline_mean_square_curvature':mean_sq_curv,
-        'spline_rms_curvature':        rms_curv,
+        'spline_mean_curvature': float(mean_curv),
+        'spline_mean_square_curvature': float(mean_sq_curv),
+        'spline_rms_curvature': float(np.sqrt(mean_sq_curv)),
     }
 
-def compute_fractal_dimension(points, box_sizes=None):
-    points = np.asarray(points)
-    if points.ndim != 2 or points.shape[1] != 3 or len(points) == 0:
+
+def _centreline_points(G, step=0.1):
+    """Points every `step` mm along all edges of G (the centreline as a
+    curve set, independent of how densely the graph nodes are spaced)."""
+    if G.number_of_edges() == 0:
+        return np.empty((0, 3))
+    # every node once, plus the interior points of each edge (no point is
+    # repeated, so the count per mm does not depend on node spacing)
+    seg = [np.array([G.nodes[n]['pos'] for n in G.nodes() if G.degree(n) > 0], float)]
+    for u, v in G.edges():
+        p, q = np.asarray(G.nodes[u]['pos'], float), np.asarray(G.nodes[v]['pos'], float)
+        m = int(np.ceil(np.linalg.norm(q - p) / step))
+        if m > 1:
+            seg.append(p + np.outer(np.arange(1, m) / m, q - p))
+    return np.vstack(seg)
+
+
+def compute_fractal_dimension(G, min_box=1.0, max_box=16.0, n_sizes=9, step=0.1, return_r2=False):
+    """Box-counting dimension of the centreline over a FIXED range of box
+    sizes in mm, so values are comparable between components and subjects.
+
+    The previous version scaled the box sizes to each component's extent and
+    counted nodes only, which made FD track component size (a straight 10 mm
+    vessel scored 0.72). The range is shrunk to extent/4 for small graphs, and
+    NaN is returned when fewer than 2 octaves remain. Counts are averaged over
+    three grid offsets.
+    """
+    pts = _centreline_points(G, step)
+    nan = (np.nan, np.nan) if return_r2 else np.nan
+    if len(pts) == 0:
+        return nan
+    lo, hi = max(min_box, 4 * step), min(max_box, np.ptp(pts, axis=0).max() / 4)
+    if hi < 4 * lo:
+        return nan
+    sizes = np.logspace(np.log10(lo), np.log10(hi), n_sizes)
+    p0 = pts - pts.min(axis=0)
+    counts = [np.mean([len(np.unique(np.floor((p0 + o * sz) / sz).astype(np.int64), axis=0))
+                       for o in (0.0, 0.33, 0.67)]) for sz in sizes]
+    x, y = np.log(sizes), np.log(counts)
+    slope, icpt = np.polyfit(x, y, 1)
+    r2 = 1 - np.sum((y - (slope * x + icpt)) ** 2) / np.sum((y - y.mean()) ** 2)
+    return (float(-slope), float(r2)) if return_r2 else float(-slope)
+
+
+def calculate_lacunarity(G, box_size=5.0, step=0.1):
+    """Fixed-grid lacunarity, Var/Mean^2 + 1 of the centreline *length* per
+    box, with a fixed box size in mm. Length (not node count) is used so the
+    value does not depend on node spacing; the box size is fixed (not 1/10 of
+    each component's extent) so values are comparable between graphs.
+    NaN when the graph spans fewer than 2 boxes."""
+    pts = _centreline_points(G, step)
+    if len(pts) == 0:
         return np.nan
-
-    mins = points.min(axis=0)
-    shifted = points - mins
-    maxs = shifted.max(axis=0)
-    max_dim = max(maxs)
-
-    if max_dim == 0: return np.nan
-
-    if box_sizes is None:
-        box_sizes = np.logspace(np.log10(max_dim / 50.0), np.log10(max_dim), num=10, base=10.0)
-    
-    counts = []
-    valid_box_sizes = []
-    for size in box_sizes:
-        if size <= 0 or np.isnan(size): continue
-        indices = np.floor(shifted / size).astype(int)
-        counts.append(len(np.unique(indices, axis=0)))
-        valid_box_sizes.append(size)
-    
-    if len(counts) == 0: return np.nan
-
-    X = np.log(1.0 / np.array(valid_box_sizes)).reshape(-1, 1)
-    y = np.log(counts)
-    reg = LinearRegression().fit(X, y)
-    return reg.coef_[0]
-
-def calculate_lacunarity(points, box_size):
-    points = np.asarray(points)
-    mins = points.min(axis=0)
-    shifted = points - mins
-    maxs = shifted.max(axis=0)
-    num_boxes = np.ceil(maxs / box_size).astype(int) + 1
-
-    # Bincount over the C-order flat index -- exactly what the old
-    # grid[tuple(idx)] += 1 loop followed by grid.flatten() produced, without
-    # the Python-level pass over every point.
-    indices = np.floor(shifted / box_size).astype(int)
-    flat_idx = np.ravel_multi_index(indices.T, num_boxes)
-    counts = np.bincount(flat_idx, minlength=int(np.prod(num_boxes))).astype(float)
+    shifted = pts - pts.min(axis=0)
+    num_boxes = np.floor(shifted.max(axis=0) / box_size).astype(int) + 1
+    if np.prod(num_boxes) < 2:
+        return np.nan
+    flat = np.ravel_multi_index(np.floor(shifted / box_size).astype(int).T, num_boxes)
+    counts = np.bincount(flat, minlength=int(np.prod(num_boxes))).astype(float)
     mean_val = counts.mean()
-    var_val = counts.var()
-    return var_val / (mean_val**2) + 1 if mean_val != 0 else np.nan
+    return float(counts.var() / mean_val ** 2 + 1) if mean_val > 0 else np.nan
 
 def analyze_component_structure(G_comp):
+    """Loops (cyclomatic number), and degree >= 4 nodes split by origin:
+    'merged' ones were created by Graph_extractor's ladder-rung contraction
+    (two junctions < 1 mm apart merged into one, node attribute 'merged'),
+    the others came out of skeletonisation as is.
+    Only the latter are reported as abnormal; previously every merge was
+    counted as an anomaly (ADAM test mask: 3 -> 18)."""
     num_loops = len(nx.cycle_basis(G_comp))
-    abnormal_degree_nodes = [node for node, degree in G_comp.degree() if degree > 3]
-    return num_loops, len(abnormal_degree_nodes)
+    high = [n for n, d in G_comp.degree() if d > 3]
+    # 'merged' (current) or networkx's 'contraction' (graphs from earlier versions)
+    merged = [n for n in high if G_comp.nodes[n].get('merged') or 'contraction' in G_comp.nodes[n]]
+    return num_loops, len(high) - len(merged), len(merged)
 
 def extract_branch_segments(G_comp):
     """
@@ -197,118 +227,131 @@ def extract_branch_segments(G_comp):
     return segments
 
 
-def compute_main_path(G_comp, distance_map):
-    """
-    Dominant-vessel path: the weighted shortest path between the two
-    largest-diameter endpoints. Returns a node chain, or None if the component
-    has fewer than two endpoints. Gives a single well-defined main-vessel
-    tortuosity measure in place of the old overlapping root-to-leaf family.
-    """
-    endpoints = [node for node, deg in G_comp.degree() if deg == 1]
-    if len(endpoints) < 2:
-        return None
-    diameters = {node: 2 * distance_map.get(node, 0.5) for node in endpoints}
-    e1, e2 = sorted(endpoints, key=lambda n: diameters[n], reverse=True)[:2]
-    try:
-        return nx.dijkstra_path(G_comp, e1, e2, weight='weight')
-    except (nx.NetworkXNoPath, nx.NodeNotFound):
-        return None
+def network_metrics(G):
+    """Metrics defined on a whole (possibly disconnected) network rather
+    than per component: fractal dimension (fixed 1-16 mm scale range, with
+    its fit R^2) and lacunarity (fixed 5 mm boxes)."""
+    fd, r2 = compute_fractal_dimension(G, return_r2=True)
+    return {'fractal_dimension': fd, 'fractal_dimension_r2': r2, 'lacunarity': calculate_lacunarity(G)}
 
-def save_results(results, output_folder, region_true_volumes=None, patient_name=None):
+
+COMPONENT_KEYS = [
+    'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
+    'fractal_dimension', 'lacunarity', 'num_loops', 'num_abnormal_degree_nodes', 'num_merged_junctions',
+    'avg_diameter', 'tortuosity_index', 'num_segments',
+    'num_bifurcations_measured', 'num_bifurcations_short_loop', 'median_bifurcation_angle',
+]
+SEGMENT_COLUMNS = [
+    'geodesic_length', 'chord_length', 'tortuosity_index', 'avg_diameter',
+    'spline_mean_curvature', 'spline_mean_square_curvature', 'spline_rms_curvature',
+]
+
+
+def _component_row(data):
+    row = {k: data.get(k, np.nan) for k in COMPONENT_KEYS}
+    agg = data.get('aggregated_tortuosity', {})
+    row['mean_curvature'] = agg.get('mean_curvature', np.nan)
+    row['mean_square_curvature'] = agg.get('mean_square_curvature', np.nan)
+    return row
+
+
+def summarize_components(components, network=None, true_volume=None):
+    """One summary row from a list of component dicts (a region, or the whole
+    graph): counts and lengths summed, curvature / diameter length-weighted
+    over components, tortuosity index and junction values pooled over all
+    segments and junctions, network-level FD/lacunarity, and the mask volume
+    if given."""
+    comps = sorted(components, key=lambda d: d.get('total_length', 0), reverse=True)
+    row = {'num_components': len(comps)}
+    for k in ('total_length', 'num_bifurcations', 'volume', 'num_loops', 'num_abnormal_degree_nodes',
+              'num_merged_junctions', 'num_segments'):
+        row[k] = float(np.nansum([d.get(k, np.nan) for d in comps])) if comps else 0.0
+    tl = row['total_length']
+    row['bifurcation_density'] = row['num_bifurcations'] / tl if tl > 0 else np.nan
+    lw = {'mean_curvature': lambda d: d.get('aggregated_tortuosity', {}).get('mean_curvature', np.nan),
+          'mean_square_curvature': lambda d: d.get('aggregated_tortuosity', {}).get('mean_square_curvature', np.nan),
+          'avg_diameter': lambda d: d.get('avg_diameter', np.nan)}
+    for k, get in lw.items():
+        v = np.array([get(d) for d in comps], float)
+        # curvature: weight by the length on which it is defined
+        wkey = 'curvature_length' if 'curvature' in k else 'total_length'
+        w = np.array([d.get(wkey, d.get('total_length', 0)) for d in comps], float)
+        ok = np.isfinite(v) & (w > 0)
+        row[k] = float(np.sum(v[ok] * w[ok]) / np.sum(w[ok])) if ok.any() else np.nan
+    row.update(pooled_summary(comps))
+    row.update(network or {})
+    if true_volume is not None:
+        row['volume_approx_cylinder'] = row['volume']
+        row['volume'] = true_volume
+    return row
+
+
+def save_results(results, output_folder, region_true_volumes=None, patient_name=None,
+                 region_network_metrics=None):
+    """Write the metric tables:
+
+      <patient>_all_components_by_region.csv   one row per connected component
+      <patient>_region_summary.csv             one row per region ('global' without atlas)
+      <patient>_segments.csv                   one row per branch segment
+      <patient>_bifurcations.csv               one row per measured junction
+
+    region_network_metrics: {region_label: network_metrics(region graph)},
+    written to the region summary (FD/lacunarity are computed on the region's
+    whole network, not averaged over components).
+    """
     print("  Saving results...")
     file_prefix = f"{patient_name}_" if patient_name else ""
-    general_keys = [
-        'total_length', 'num_bifurcations', 'bifurcation_density', 'volume',
-        'fractal_dimension', 'lacunarity', 'num_loops', 'num_abnormal_degree_nodes'
-    ]
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    all_rows = []
-    region_rows = []
-
+    region_rows, seg_rows, bif_rows = [], [], []
     region_results = results.get('region_metrics', {'global': results})
     if 'global' in region_results: print("  No regional metrics found, saving global results only.")
 
+    region_components = {}
     for region_label, region_data in region_results.items():
-        if not isinstance(region_data, dict): continue 
+        if not isinstance(region_data, dict): continue
         components = {k: v for k, v in region_data.items() if isinstance(v, dict) and 'total_length' in v}
+        region_components[region_label] = list(components.values())
         sorted_items = sorted(components.items(), key=lambda item: item[1].get('total_length', 0), reverse=True)
-
-        for new_idx, (cid, data) in enumerate(sorted_items):
-            comp_idx = new_idx + 1
-            region_name = f"Region_{region_label}"
-            comp_dir = os.path.join(output_folder, "regional_results" ,region_name, f"Conn_comp_{comp_idx}")
-            Path(comp_dir).mkdir(parents=True, exist_ok=True)
-
-            row = {'region_label': region_label, 'component_index': comp_idx, 'original_component_id': cid}
-            for k in general_keys: row[k] = data.get(k, np.nan)
-            row['num_segments'] = data.get('num_segments', np.nan)
-
-            agg = data.get('aggregated_tortuosity', {})
-            row['mean_curvature'] = agg.get('mean_curvature', np.nan)
-            row['mean_square_curvature'] = agg.get('mean_square_curvature', np.nan)
-            mp = data.get('main_path_tortuosity', {})
-            row['main_path_mean_curvature'] = mp.get('mean_curvature', np.nan)
-            row['main_path_mean_square_curvature'] = mp.get('mean_square_curvature', np.nan)
-
-            all_rows.append({k: v for k, v in row.items() if k != 'region_label'})
+        for comp_idx, (_, data) in enumerate(sorted_items, start=1):
+            row = {'region_label': region_label, 'component_index': comp_idx}
+            row.update(_component_row(data))
             region_rows.append(row)
+            for seg_idx, e in enumerate(data.get('segments', []), start=1):
+                sm = e.get('segment_metrics', {})
+                seg_rows.append({'region_label': region_label, 'component_index': comp_idx, 'segment_index': seg_idx,
+                                 **{k: sm.get(k, np.nan) for k in SEGMENT_COLUMNS}})
+            for b in data.get('bifurcations', []):
+                bif_rows.append({'region_label': region_label, 'component_index': comp_idx,
+                                 'x': b['pos'][0], 'y': b['pos'][1], 'z': b['pos'][2],
+                                 **{k: b[k] for k in ('bifurcation_angle', 'deflection_1', 'deflection_2', 'on_short_loop')}})
 
-            if 'segments' in data:
-                # Flat per-segment output: branches are unique, no per-root subfolders.
-                segs_dir = os.path.join(comp_dir, 'Segments')
-                os.makedirs(segs_dir, exist_ok=True)
-                for seg_idx, seg_entry in enumerate(data['segments'], start=1):
-                    sm = seg_entry.get('segment_metrics', {})
-                    seg_dir = os.path.join(segs_dir, f"Segment_{seg_idx}")
-                    os.makedirs(seg_dir, exist_ok=True)
-                    pd.DataFrame([sm]).to_csv(os.path.join(seg_dir, 'Segment_metrics.csv'), index=False)
+    pd.DataFrame(seg_rows, columns=['region_label', 'component_index', 'segment_index'] + SEGMENT_COLUMNS).to_csv(
+        os.path.join(output_folder, f'{file_prefix}segments.csv'), index=False)
+    pd.DataFrame(bif_rows, columns=['region_label', 'component_index', 'x', 'y', 'z',
+                                    'bifurcation_angle', 'deflection_1', 'deflection_2', 'on_short_loop']).to_csv(
+        os.path.join(output_folder, f'{file_prefix}bifurcations.csv'), index=False)
 
     if region_rows:
         df_detailed = pd.DataFrame(region_rows)
-        df_detailed = df_detailed.drop(columns=['component_index', 'original_component_id'], errors='ignore')
         df_detailed = df_detailed.sort_values(by=['region_label', 'total_length'], ascending=[True, False])
-        df_detailed.to_csv(os.path.join(output_folder, f'{file_prefix}all_components_by_region.csv'), index=False)
+        df_detailed.to_csv(
+            os.path.join(output_folder, f'{file_prefix}all_components_by_region.csv'), index=False)
 
-        summary_metrics = ['total_length', 'num_bifurcations', 'volume', 'num_loops', 'num_abnormal_degree_nodes', 'num_segments']
-        tortuosity_cols = [
-            'mean_curvature', 'mean_square_curvature',
-            'main_path_mean_curvature', 'main_path_mean_square_curvature'
-        ]
-
-        region_groups = df_detailed.groupby('region_label')
         summary_rows = []
-
-        for region_label, group in region_groups:
-            row = {'region_label': region_label, 'num_components': len(group)}
-            for metric in summary_metrics: row[metric] = group[metric].sum()
-
-            # Ground-truth mask volume applied once here at region level (not
-            # per-component, which would be re-summed and double-counted).
-            if region_true_volumes and region_label in region_true_volumes:
-                row['volume_approx_cylinder'] = row.get('volume', np.nan)
-                row['volume'] = region_true_volumes[region_label]
-
-            total_len = group['total_length'].sum()
-            for col in tortuosity_cols:
-                if col in group:
-                    # NaN components drop from both numerator and denominator
-                    # (fillna(0) would drag the average toward zero).
-                    valid = group[col].notna()
-                    w = group['total_length'][valid]
-                    w_sum = w.sum()
-                    row[col] = ((group[col][valid] * w).sum() / w_sum) if w_sum > 0 else np.nan
-                else:
-                    row[col] = np.nan
-
+        for region_label in sorted(region_components, key=str):
+            tv = (region_true_volumes or {}).get(region_label)
+            row = {'region_label': region_label}
+            row.update(summarize_components(region_components[region_label],
+                                            (region_network_metrics or {}).get(region_label), tv))
             summary_rows.append(row)
 
-        df_summary = pd.DataFrame(summary_rows)
-        df_summary = df_summary.sort_values(by='region_label')
+        df_summary = pd.DataFrame(summary_rows).sort_values(by='region_label')
         df_summary.to_csv(os.path.join(output_folder, f'{file_prefix}region_summary.csv'), index=False)
 
     print(f"Results saved to: {output_folder}")
 
-    
+
 def ensure_edge_weights(G):
     """
     Guarantee every edge carries a physical 'weight' (length in mm).
@@ -337,6 +380,46 @@ def ensure_edge_weights(G):
     return len(missing)
 
 
+TORTUOSITY_MIN_LENGTH_MM = 6.0
+
+
+def _bifurcation_summary(bifs):
+    """Median bifurcation angle over junctions (pooled). Junctions whose
+    daughters rejoin within a short loop (mask tunnels, tiny anastomoses;
+    Branch_metrics.SHORT_LOOP_MM) are counted but not in the median."""
+    ang = [b['bifurcation_angle'] for b in bifs if not b.get('on_short_loop', False)]
+    return {'num_bifurcations_measured': len(ang),
+            'num_bifurcations_short_loop': len(bifs) - len(ang),
+            'median_bifurcation_angle': float(np.median(ang)) if ang else np.nan}
+
+
+def pooled_summary(component_dicts):
+    """Region/global-level values pooled over the components' segments and
+    junctions (not averages of component medians)."""
+    bifs = [b for d in component_dicts for b in d.get('bifurcations', [])]
+    segs = [e.get('segment_metrics', {}) for d in component_dicts for e in d.get('segments', [])]
+    out = _bifurcation_summary(bifs)
+    out['tortuosity_index'] = median_tortuosity_index(component_dicts)
+    L = np.array([m.get('geodesic_length', 0.0) for m in segs], float)
+    ok = np.array([np.isfinite(m.get('spline_mean_curvature', np.nan)) for m in segs], bool)
+    out['curvature_length_coverage'] = float(L[ok].sum() / L.sum()) if L.sum() > 0 else np.nan
+    return out
+
+
+def median_tortuosity_index(component_dicts):
+    """Median arc/chord over all segments >= TORTUOSITY_MIN_LENGTH_MM of the
+    given components (segments pooled, not averaged per component).
+
+    A median, not a length-weighted mean: a few near-closed segments (chord
+    -> 0, e.g. a vessel that leaves and re-enters the same bifurcation) have
+    arc/chord in the tens to hundreds and would dominate a mean (TRE test
+    graph: mean 2.18 vs median 1.27)."""
+    vals = [sm['tortuosity_index'] for d in component_dicts for e in d.get('segments', [])
+            for sm in (e.get('segment_metrics', {}),)
+            if sm.get('geodesic_length', 0) >= TORTUOSITY_MIN_LENGTH_MM and np.isfinite(sm.get('tortuosity_index', np.inf))]
+    return float(np.median(vals)) if vals else np.nan
+
+
 def compute_metrics_for_mask(G, node_radius_map):
     """Compute the full metric set for every connected component of G. All
     metrics are always computed -- there is no selection knob."""
@@ -346,7 +429,6 @@ def compute_metrics_for_mask(G, node_radius_map):
         Gc = G.subgraph(comp_nodes).copy()
         data = {}
 
-        coords = np.array([Gc.nodes[n]['pos'] for n in Gc.nodes()])
         total_len = Gc.size(weight='weight')
         degrees = dict(Gc.degree())
         num_bif = sum(1 for d in degrees.values() if d >= 3)
@@ -365,13 +447,13 @@ def compute_metrics_for_mask(G, node_radius_map):
             vol += np.pi * l * (r_u ** 2 + r_u * r_v + r_v ** 2) / 3.0
         data['volume'] = vol
 
-        data['fractal_dimension'] = compute_fractal_dimension(coords)
-        box_size = np.max(coords.max(axis=0) - coords.min(axis=0)) / 10 or 1
-        data['lacunarity'] = calculate_lacunarity(coords, box_size)
+        data['fractal_dimension'] = compute_fractal_dimension(Gc)
+        data['lacunarity'] = calculate_lacunarity(Gc)
 
-        nl, nab = analyze_component_structure(Gc)
+        nl, nab, nmerged = analyze_component_structure(Gc)
         data['num_loops'] = nl
         data['num_abnormal_degree_nodes'] = nab
+        data['num_merged_junctions'] = nmerged
 
         # Unique branch decomposition: each segment appears once (no trunk
         # overlap), so no traversal-count down-weighting is needed.
@@ -383,6 +465,8 @@ def compute_metrics_for_mask(G, node_radius_map):
         # each metric sums only the length of segments that defined it.
         len_curv = len_curv2 = 0.0
         sum_curv = sum_curv2 = 0.0
+
+        edt_rmap = {n: float(Gc.nodes[n].get('radius_edt', node_radius_map.get(n, np.nan))) for n in Gc.nodes()}
 
         def _segment_tortuosity(chain):
             pts = np.array([Gc.nodes[n]['pos'] for n in chain])
@@ -402,12 +486,18 @@ def compute_metrics_for_mask(G, node_radius_map):
             w[:-1] += seg_lens / 2.0
             w[1:] += seg_lens / 2.0
             sm['avg_diameter'] = float(np.average(diam, weights=w)) if w.sum() > 0 else float(diam.mean())
-            tort = compute_tortuosity_metrics(pts, smoothing=0, n_samples=500)
-            sm.update(tort)  # spline_mean/mean_square/rms_curvature
+            tort = compute_tortuosity_metrics(pts)
+            sm.update(tort)  # spline_mean/mean_square/rms_curvature (NaN < 6 mm)
             return sm, L_geo, tort
+
+        # Length-weighted mean of per-segment diameter.
+        len_diam = sum_diam = 0.0
 
         for seg in seg_list:
             sm, L_geo, tort = _segment_tortuosity(seg)
+            if L_geo > 0 and np.isfinite(sm['avg_diameter']):
+                sum_diam += sm['avg_diameter'] * L_geo
+                len_diam += L_geo
             if not np.isnan(tort['spline_mean_curvature']):
                 sum_curv += tort['spline_mean_curvature'] * L_geo
                 len_curv += L_geo
@@ -418,23 +508,18 @@ def compute_metrics_for_mask(G, node_radius_map):
 
         data['segments'] = [{'segment_metrics': sm} for sm in seg_metrics]
         data['num_segments'] = len(seg_metrics)
+        data['avg_diameter'] = (sum_diam / len_diam) if len_diam > 0 else np.nan
+        data['tortuosity_index'] = median_tortuosity_index([data])
+        data['curvature_length'] = len_curv
         data['aggregated_tortuosity'] = {
             'mean_curvature': (sum_curv / len_curv) if len_curv > 0 else np.nan,
             'mean_square_curvature': (sum_curv2 / len_curv2) if len_curv2 > 0 else np.nan,
         }
 
-        # Dominant-vessel ("main path") tortuosity: one well-defined path
-        # between the two largest-diameter endpoints.
-        main_chain = compute_main_path(Gc, node_radius_map)
-        if main_chain is not None and len(main_chain) >= 4:
-            mp_pts = np.array([Gc.nodes[n]['pos'] for n in main_chain])
-            mp = compute_tortuosity_metrics(mp_pts, smoothing=0, n_samples=500)
-            data['main_path_tortuosity'] = {
-                'mean_curvature': mp['spline_mean_curvature'],
-                'mean_square_curvature': mp['spline_mean_square_curvature'],
-            }
-        else:
-            data['main_path_tortuosity'] = {'mean_curvature': np.nan, 'mean_square_curvature': np.nan}
+        # Bifurcations: branching angles per junction.
+        bifs = BM.bifurcation_metrics(Gc, node_radius_map, seg_list, junction_radius=edt_rmap)
+        data['bifurcations'] = bifs
+        data.update(_bifurcation_summary(bifs))
 
         results[cid] = data
     return results
@@ -579,6 +664,10 @@ def robust_graph_loader(pkl_path):
 
     if G is None:
         raise ValueError(f"Could not find a valid networkx Graph in {pkl_path}")
+    if G.is_directed():
+        # Every metric here is orientation-free, and connected_components()
+        # raises on directed graphs.
+        G = G.to_undirected()
 
     # Fallback: Build radius map from node attributes if not provided separately
     if node_radius_map is None:
@@ -587,6 +676,91 @@ def robust_graph_loader(pkl_path):
             node_radius_map[n] = G.nodes[n].get('radius', 0.5) 
 
     return G, node_radius_map
+
+def region_graphs(G, node_label):
+    """Split G into one graph per atlas region: the subgraph induced by each
+    region's nodes (node_label: {node: region id}, 0 = outside every region).
+    Edges between two regions are dropped, so a vessel crossing a border is
+    cut there. Returns {region id: graph}."""
+    by = {}
+    for n, r in node_label.items():
+        if r > 0:
+            by.setdefault(r, []).append(n)
+    return {r: G.subgraph(ns).copy() for r, ns in by.items()}
+
+
+# QC flags: (column, test, threshold, meaning). Thresholds set from clean vs
+# noisy phantoms and the test masks.
+QC_FLAGS = [
+    ('uncovered_volume_fraction', '>', 0.05, 'centreline misses >5 % of the mask volume'),
+    ('graph_to_mask_volume', 'outside', (0.85, 1.15), 'graph volume differs from mask volume by >15 %'),
+    ('small_component_length_fraction', '>', 0.10, '>10 % of length in fragments < 10 mm'),
+    ('short_terminal_branches_per_100mm', '>', 1.0, 'many short terminal branches (spurs: noisy mask?)'),
+    ('curvature_length_coverage', '<', 0.60, 'curvature defined on <60 % of the length'),
+    ('fractal_dimension_r2', '<', 0.98, 'box-counting fit poor (FD unreliable)'),
+    ('facing_endpoint_pairs', '>', 0, 'wide vessel ends facing each other across a gap (vessel interrupted?)'),
+]
+
+
+def qc_row(graph_package, summary):
+    """Flat QC record: the graph-extraction QC stored in the pkl (if the graph
+    came from Graph_extractor) plus metric-level checks, and the list of
+    raised flags."""
+    row = dict((graph_package or {}).get('qc', {}))
+    tl = summary.get('total_length', np.nan)
+    if 'short_terminal_branches' in row and tl and tl > 0:
+        row['short_terminal_branches_per_100mm'] = 100.0 * row['short_terminal_branches'] / tl
+    for k in ('total_length', 'num_components', 'curvature_length_coverage', 'fractal_dimension_r2',
+              'num_bifurcations_measured', 'num_bifurcations_short_loop'):
+        if k in summary:
+            row.setdefault(k, summary[k])
+    flags = []
+    for col, op, thr, meaning in QC_FLAGS:
+        v = row.get(col, np.nan)
+        if v is None or not np.isfinite(v):
+            continue
+        bad = (v > thr) if op == '>' else (v < thr) if op == '<' else (v < thr[0] or v > thr[1])
+        if bad:
+            flags.append(f"{col}: {meaning}")
+    row['qc_flags'] = '; '.join(flags)
+    row['qc_pass'] = not flags
+    return row
+
+
+def _default(fn, name):
+    import inspect
+    return inspect.signature(fn).parameters[name].default
+
+
+def _write_run_info(output_folder, patient_name, graph_pkl_path, graph_package, extra):
+    import json
+    import Graph_extractor as _GE
+    info = {'graph_file': os.path.abspath(graph_pkl_path),
+            'graph_code_version': (graph_package or {}).get('code_version', 'unknown'),
+            'graph_params': (graph_package or {}).get('params', {}),
+            'metric_code_version': _GE.code_version(),
+            'metric_settings': {'curvature_sigma_mm': _default(compute_tortuosity_metrics, 'sigma'),
+                                'curvature_end_trim_mm': _default(compute_tortuosity_metrics, 'end_trim'),
+                                'curvature_min_length_mm': _default(compute_tortuosity_metrics, 'min_length'),
+                                'fd_box_range_mm': [_default(compute_fractal_dimension, 'min_box'),
+                                                    _default(compute_fractal_dimension, 'max_box')],
+                                'lacunarity_box_mm': _default(calculate_lacunarity, 'box_size'),
+                                'tortuosity_min_length_mm': TORTUOSITY_MIN_LENGTH_MM,
+                                'bifurcation_end_exclusion_mm': BM.END_EXCLUSION_MM,
+                                'bifurcation_window_mm': BM.BIF_WINDOW_MM}}
+    info.update(extra)
+    with open(os.path.join(output_folder, f'{patient_name}_run_info.json'), 'w') as f:
+        json.dump(info, f, indent=1, default=str)
+
+
+def _load_package(path):
+    try:
+        with open(path, 'rb') as f:
+            d = pickle.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
 
 def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_path=None, registered_atlas_path=None):
     use_atlas = True if registered_atlas_path else False
@@ -603,6 +777,7 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
         G, node_radius_map = robust_graph_loader(graph_pkl_path)
     except Exception as e:
         raise RuntimeError(f"Failed to load graph from {graph_pkl_path}: {e}") from e
+    package = _load_package(graph_pkl_path) if str(graph_pkl_path).endswith('.pkl') else {}
     
     # Optional true mask: gives an exact voxel-count volume instead of the
     # cylinder/frustum graph approximation.
@@ -628,7 +803,7 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
         aligned_atlas_data = np.round(aligned_atlas_img.get_fdata(dtype=np.float32)).astype(np.int16)
         inv_affine = np.linalg.inv(aligned_atlas_img.affine)
         
-        region_nodes = {}
+        node_label = {}
         size = aligned_atlas_data.shape
         
         for n in G.nodes():
@@ -645,19 +820,20 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
                     # Any positive label is a region -- atlas-agnostic, works
                     # for any parcellation. 0 is the standard background/
                     # unlabeled voxel value.
-                    if region_id > 0:
-                        if region_id not in region_nodes: region_nodes[region_id] = []
-                        region_nodes[region_id].append(n)
+                    node_label[n] = int(region_id)
             except Exception as e:
                 raise ValueError(f"Failed to transform point {pos} to index in atlas. Error: {e}")
             
+        ensure_edge_weights(G)
+        regions = region_graphs(G, node_label)
         region_true_volumes = {}
-        for r_id in sorted(region_nodes.keys()):
+        region_net = {}
+        for r_id in sorted(regions.keys()):
             r_id_int = int(r_id) # Absolute safety cast for dictionary matching
-            r_name = label_map.get(r_id_int, f"region_{r_id_int}")
 
-            sub_G = G.subgraph(region_nodes[r_id]).copy()
+            sub_G = regions[r_id]
             region_result = compute_metrics_for_mask(sub_G, node_radius_map)
+            region_net[r_id_int] = network_metrics(sub_G)
 
             # Record True Regional Volume (applied once at region-summary level
             # in save_results, not per-component -- see region_true_volumes).
@@ -667,17 +843,17 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
 
             results['region_metrics'][r_id_int] = region_result
 
-        save_results(results, output_folder, region_true_volumes=region_true_volumes, patient_name=patient_name)
+        save_results(results, output_folder, region_true_volumes=region_true_volumes, patient_name=patient_name,
+                     region_network_metrics=region_net)
 
-        n_regions = len(region_nodes)
+        n_regions = len(regions)
         print(f"  Found {n_regions} arterial regions. Generating regional VTPs for {patient_name}...")
         regional_actors = []
         regions_vtp_dir = os.path.join(output_folder, "regional_vtps")
         os.makedirs(regions_vtp_dir, exist_ok=True)
         
-        for r_id, nodes in region_nodes.items():
+        for r_id, sub_G in regions.items():
             r_id_int = int(r_id)
-            sub_G = G.subgraph(nodes)
             s_pts = [sub_G.nodes[u]['pos'] for u, v in sub_G.edges()]
             e_pts = [sub_G.nodes[v]['pos'] for u, v in sub_G.edges()]
             
@@ -707,65 +883,12 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
         print("  Computing true global metrics on the full unparcellated graph...")
         true_global_result = compute_metrics_for_mask(G, node_radius_map)
 
-        # Aggregate all disconnected components for the global summary
-        global_data = {
-            'total_length': 0.0,
-            'num_bifurcations': 0,
-            'volume': 0.0,
-            'num_loops': 0,
-            'num_abnormal_degree_nodes': 0,
-            'num_segments': 0
-        }
+        global_data = summarize_components(list(true_global_result.values()), network_metrics(G),
+                                           total_true_volume if true_mask_data is not None else None)
 
-        # Variables for length-weighted tortuosity averages
-        tortuosity_cols = [
-            'mean_curvature', 'mean_square_curvature',
-            'main_path_mean_curvature', 'main_path_mean_square_curvature'
-        ]
-        tortuosity_sums = {col: 0.0 for col in tortuosity_cols}
-        # Per-column length accumulator: only components that actually defined
-        # a given metric may contribute their length to its denominator (see
-        # the same fix in compute_metrics_for_mask and save_results).
-        tortuosity_lens = {col: 0.0 for col in tortuosity_cols}
-
-        for cid, comp_data in true_global_result.items():
-            comp_length = comp_data.get('total_length', 0)
-
-            # Sum up additive metrics
-            global_data['total_length'] += comp_length
-            global_data['num_bifurcations'] += comp_data.get('num_bifurcations', 0)
-            global_data['volume'] += comp_data.get('volume', 0)
-            global_data['num_loops'] += comp_data.get('num_loops', 0)
-            global_data['num_abnormal_degree_nodes'] += comp_data.get('num_abnormal_degree_nodes', 0)
-            global_data['num_segments'] += comp_data.get('num_segments', 0)
-
-            # Accumulate length-weighted tortuosity (component branch aggregate
-            # and dominant-path measure), each over its own valid length.
-            agg = comp_data.get('aggregated_tortuosity', {})
-            mp = comp_data.get('main_path_tortuosity', {})
-            pairs = [
-                ('mean_curvature', agg.get('mean_curvature', np.nan)),
-                ('mean_square_curvature', agg.get('mean_square_curvature', np.nan)),
-                ('main_path_mean_curvature', mp.get('mean_curvature', np.nan)),
-                ('main_path_mean_square_curvature', mp.get('mean_square_curvature', np.nan)),
-            ]
-            for col, val in pairs:
-                if not np.isnan(val):
-                    tortuosity_sums[col] += val * comp_length
-                    tortuosity_lens[col] += comp_length
-
-        # Finalize length-weighted averages, each over its own valid length
-        for col in tortuosity_cols:
-            w = tortuosity_lens[col]
-            global_data[col] = (tortuosity_sums[col] / w) if w > 0 else np.nan
-                
-        # Inject True Global Volume from mask if available
-        if true_mask_data is not None:
-            global_data['volume_approx_cylinder'] = global_data.get('volume', 0)
-            global_data['volume'] = total_true_volume
-            
         global_df = pd.DataFrame([global_data])
         global_df.to_csv(os.path.join(output_folder, f'{patient_name}_global_summary.csv'), index=False)
+        summary_for_qc = global_data
     
     else:
         print("  Computing global vessel metrics...")
@@ -782,7 +905,15 @@ def extract_metrics(output_folder, graph_pkl_path, label_map_path=None, mask_pat
             region_true_volumes['global'] = total_voxel_count * voxel_volume_mm3
 
         results.update(global_result)
-        save_results(results, output_folder, region_true_volumes=region_true_volumes, patient_name=patient_name)
+        net = network_metrics(G)
+        save_results(results, output_folder, region_true_volumes=region_true_volumes, patient_name=patient_name,
+                     region_network_metrics={'global': net})
+        summary_for_qc = summarize_components(list(global_result.values()), net)
+
+    pd.DataFrame([qc_row(package, summary_for_qc)]).to_csv(
+        os.path.join(output_folder, f'{patient_name}_qc.csv'), index=False)
+    _write_run_info(output_folder, patient_name, graph_pkl_path, package,
+                    {'mask': mask_path, 'atlas': registered_atlas_path})
 
 # =========================================================================
 #                         STANDALONE CLI EXECUTION
